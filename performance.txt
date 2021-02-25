@@ -1,0 +1,106 @@
+Baseline Performance:
+Engine Plays Black
+BEGIN GAME
+White Plays e4
+Engine Searches with Depth 5
+Generated 10.190.777 Nodes in 4.348 Seconds @ 2.547.694 nps
+Evaluated 9.771.632 Nodes in 60.305 Seconds @ 162.860 nps
+>>>> Spent 45.825 Seconds on Static Evaluation (75.9% of Eval Time)
+>>>> Spent 14.285 Seconds on Move Simulation (23.6% of Eval Time)
+>>>> Spent 0.5% of Eval Time on Management Overhead
+95.88% of All Generated Nodes were Evaluated
+Optimal Path According to the Engine is [e7e6 d1h5 d8g5 c2c4 g8f6]
+The Engine Plays e7e6
+
+
+Optimized Minimax: (Fixed Bugs, Perf Neutral even though more checks are present)
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Searched 10.190.777 Nodes in 72,362 Seconds @ 140.830 nps
+Optimal Path According to the Engine: [b8c6 b1c3 g8f6 f1b5 f6e4]
+Evaluated 95.88% of All nodes
+Generated 10.190.777 Nodes in 4.619ms for 2.547.694NPS
+Evaluated 9.771.632 Nodes in 65.098ms for 150.332NPS
+>>>> StaticEval:51.177ms SimulateMove:15.822ms
+The Engine Plays b8c6
+
+Minimax_Generate_OTF: (+6Kn/s Eval)
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine: [d7d5 f1b5 c7c6 b5f1 c6c5]
+Generated:10.190.777,Visited:10.190.798
+Search Completed in 69.778ms
+Searched 10.190.777 Nodes in 69,778 Seconds @ 146.045 nps
+The Engine Plays d7d5
+
+Minimax_Alpha_Beta_Prune: (+1.531Mn/s Effective Search Speed)
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine: [b8c6 a2a4 g8f6 f1b5 f6e4]
+Generated: 10.190.777 Visited: 849.016 Evaluated: 173.204 LoadedFromCache: 419.299
+Search Completed in 6075ms
+Searched 10.190.777 Nodes in 6,075 Seconds @ 1.677.494 nps
+
+
+Minimax_Alpha_Beta_Prune_Generate_Dynamic: (+3.221Mn/s Effective Search Speed)
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine: [b8c6 a2a4 g8f6 f1b5 f6e4]
+Generated: 1.660.192 Visited: 241.649 Evaluated: 173.849 LoadedFromCache: 0
+Search Completed in 2080ms
+Searched 10.190.777 Nodes in 2,080 Seconds @ 4.899.412 nps
+
+Minimax_ABD_Optimize_Eval: (+832Kn/s Effective Search Speed)
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine: [b8c6 b1a3 g8f6 f1b5 f6e4]
+Generated: 1.629.087 Visited: 231.820 Evaluated: 165.223
+Search Completed in 1778ms
+Searched 10.190.777 Nodes in 1,778 Seconds @ 5.731.595 nps
+
+Minimax_ABD_Optimize_Eval: (+832Kn/s Effective Search Speed)
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine: [b8c6 b1a3 g8f6 f1b5 f6e4]
+Generated: 1.629.087 Visited: 231.820 Evaluated: 165.223
+Search Completed in 1778ms
+Searched 10.190.777 Nodes in 1,778 Seconds @ 5.731.595 nps
+
+Minimax_ABD_Transposition: (+605Kn/s Effective Search Speed)
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine: [b8c6 b1a3 g8f6 f1b5 f6e4]
+Generated: 1.629.087 Visited: 231.820 Evaluated: 105.126 LoadedFromCache: 60.097
+Search Completed in 1608ms
+Searched 10.190.777 Nodes in 1,608 Seconds @ 6.337.547 nps
+
+SimulateToNode() - 1,8013 microseconds
+ResetSimulation() - 57,94 nanoseconds
+GetSequence() - 0,216 microseconds
+Evaluate() - 2,124 microseconds
+
+
+Minimax_ABD_HSort: (+366eKn/s)
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine: [b8c6 b1a3 g8f6 f1b5 f6e4]
+Generated: 1.486.677 Visited: 157.337 Evaluated: 69.326 LoadedFromCache: 27.502
+Search Completed in 1520ms
+Generation Space Reduction: 85.4% Evaluation Space Reduction 98.4%
+Searched 10.190.777 Nodes in 1520 Seconds @ 6.704.458 enps

@@ -1,0 +1,8 @@
+github.com/ajstarks/svgo v0.0.0-20200320125537-f189e35d30ca h1:kWzLcty5V2rzOqJM7Tp/MfSX0RMSI1x4IOLApEefYxA=
+github.com/ajstarks/svgo v0.0.0-20200320125537-f189e35d30ca/go.mod h1:K08gAheRH3/J6wwsYMMT4xOr94bZjxIelGM0+d/wbFw=
+github.com/buger/goterm v0.0.0-20200322175922-2f3e71b85129 h1:gfAMKE626QEuKG3si0pdTRcr/YEbBoxY+3GOH3gWvl4=
+github.com/buger/goterm v0.0.0-20200322175922-2f3e71b85129/go.mod h1:u9UyCz2eTrSGy6fbupqJ54eY5c4IC8gREQ1053dK12U=
+github.com/notnil/chess v1.5.0 h1:BcdmSGqZYhoqHsAqNpVTtPwRMOA4Sj8iZY1ZuPW4Umg=
+github.com/notnil/chess v1.5.0/go.mod h1:cRuJUIBFq9Xki05TWHJxHYkC+fFpq45IWwk94DdlCrA=
+github.com/notnil/opening v0.0.0-20160727033309-f55194b516ed h1:rK/87cHWiohpR8/ol9WziOys2SvR4tBQGBp6ulpA/Rw=
+github.com/notnil/opening v0.0.0-20160727033309-f55194b516ed/go.mod h1:sm8RaS70o64tnZgfJgv8epYbTiHPjNcix3JiCBdWUEQ=
