@@ -52,7 +52,7 @@ type Engine struct {
 	LoadedFromPosCache uint
 	FrontierUnstable   uint
 	QEvaluatedNodes    uint
-	QDepth             uint
+	CurrentBestNode    *Node
 	EvaluationCache    map[[16]byte]float32
 }
 
@@ -152,12 +152,6 @@ func (e *Engine) GetOpeningName() string {
 		break
 	}
 	return ""
-}
-
-// SortNodes will return the Nodes heuristically sorted by their likelyhood to drastically alter the Score
-func (e *Engine) SortNodes(nodes []*Node) []*Node {
-	sort.Sort(byMoveVariance(nodes))
-	return nodes
 }
 
 // ByMoveVariance will Sort by Captures and Checks, which have the highest potential score variance
@@ -267,7 +261,7 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth u
 		best := MinScore
 		bestNode := &Node{}
 		leaves := node.GetLeaves(e)
-		leaves = e.SortNodes(leaves)
+		sort.Sort(byMoveVariance(leaves))
 		for _, child := range leaves {
 			nod, ev := e.MinimaxPruning(child, alpha, beta, depth-1, false)
 			if ev > best {
@@ -284,7 +278,7 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth u
 	worst := MaxScore
 	worstNode := &Node{}
 	leaves := node.GetLeaves(e)
-	leaves = e.SortNodes(leaves)
+	sort.Sort(byMoveVariance(leaves))
 	for _, child := range leaves {
 		nod, ev := e.MinimaxPruning(child, alpha, beta, depth-1, true)
 		if ev < worst {
@@ -409,7 +403,7 @@ func (n *Node) GenerateLeaves(e *Engine) []*Node {
 	// Convert the Moves to Nodes and add them to the Collection
 	for _, mov := range vmoves {
 		e.GeneratedNodes++
-		nds = append(nds, &Node{Parent: n, Value: mov})
+		nds = append(nds, &Node{Parent: n, Value: mov, Depth: n.Depth + 1})
 	}
 	// Set the Leaves of MV
 	n.Leaves = nds
