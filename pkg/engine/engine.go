@@ -30,6 +30,7 @@ var TxSTN = uint(0)
 var CnSTN = 0
 var TxEval = uint(0)
 var CnEval = 0
+var MaxQD = 0
 
 // MaxScore is Bigger than the Maximum Score Reachable
 const MaxScore = float32(3000)
@@ -202,9 +203,10 @@ func (e *Engine) Search(depth uint) *chess.Move {
 	bestNode, bestScore := e.MinimaxPruning(e.Root, MinScore, MaxScore, depth, true)
 	// Get the Origin Move of the Best Leaf
 	origin := bestNode.getSequence(e)[0]
-	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v\n", bestNode.getSequence(e), bestScore, origin)
+	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v\n", bestNode.getSequence(e), bestScore, origin, bestNode.Depth)
 	fmt.Printf("[YGG] Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
 	fmt.Printf("[YGG] FrontierUnstable:%v QuiescEvals:%v\n", e.FrontierUnstable, e.QEvaluatedNodes)
+
 	return origin
 }
 
@@ -221,9 +223,13 @@ func (e *Engine) GetColor(inv bool) chess.Color {
 
 // QuiescenceSearch will refine the Score of the Specified Node by extending the Search until a Stable position is found
 func (e *Engine) QuiescenceSearch(node *Node, alpha float32, beta float32, inv bool) float32 {
+	if node.Depth > uint8(MaxQD) {
+		MaxQD = int(node.Depth)
+		fmt.Println("DepthMX:", MaxQD)
+	}
 	e.QEvaluatedNodes++
 	e.simulateToNode(node)
-	standingPat := EvalStatic(e.Simulation, e.GetColor(inv))
+	standingPat := EvalStatic(e.Simulation, chess.White)
 	if standingPat >= beta {
 		return beta
 	}
@@ -232,11 +238,10 @@ func (e *Engine) QuiescenceSearch(node *Node, alpha float32, beta float32, inv b
 	}
 	// Generate the Unstable Leaves of this node
 	unstable := node.GetUnstableLeaves(e)
-	// Sort them By Expected Score Impact
-	sort.Sort(byMoveVariance(unstable))
 	for _, nd := range unstable {
-		e.simulateToNode(nd)
-		ev := -1 * e.QuiescenceSearch(nd, -1*beta, -1*alpha, !inv)
+		alloc := *nd
+		e.simulateToNode(&alloc)
+		ev := -e.QuiescenceSearch(&alloc, -beta, -alpha, !inv)
 		if ev >= beta {
 			return beta
 		}
@@ -376,9 +381,7 @@ func (n *Node) IsCheck() bool {
 
 // GetUnstableLeaves Returns the list of Immediate Recaptures that became availabe through the last move
 func (n *Node) GetUnstableLeaves(e *Engine) []*Node {
-	//pleaves := n.Parent.GetLeaves(e)
 	leaves := n.GetLeaves(e)
-	//delta := e.NodeCollectionDelta(leaves, pleaves)
 	unstable := []*Node{}
 	for _, nd := range leaves {
 		if nd.Value.HasTag(chess.Capture) || nd.Value.HasTag(chess.Check) {
