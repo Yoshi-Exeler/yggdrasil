@@ -80,7 +80,6 @@ func Turn() {
 		}
 	} else {
 		start := time.Now()
-		engine.MaxQD = 0
 		eng := engine.NewEngine(game, chess.Black)
 		eng.ResetStats()
 		mv := eng.Search(5)

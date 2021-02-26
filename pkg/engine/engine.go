@@ -30,7 +30,6 @@ var TxSTN = uint(0)
 var CnSTN = 0
 var TxEval = uint(0)
 var CnEval = 0
-var MaxQD = 0
 
 // MaxScore is Bigger than the Maximum Score Reachable
 const MaxScore = float32(3000)
@@ -61,6 +60,7 @@ type Engine struct {
 type Node struct {
 	Parent          *Node
 	Depth           uint8
+	QDepth          uint8
 	Value           *chess.Move
 	Leaves          []*Node
 	LeavesGenerated bool
@@ -203,7 +203,7 @@ func (e *Engine) Search(depth uint) *chess.Move {
 	bestNode, bestScore := e.MinimaxPruning(e.Root, MinScore, MaxScore, depth, true)
 	// Get the Origin Move of the Best Leaf
 	origin := bestNode.getSequence(e)[0]
-	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v\n", bestNode.getSequence(e), bestScore, origin, bestNode.Depth)
+	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v LD:%v\n", bestNode.getSequence(e), bestScore, origin, bestNode.Depth, bestNode.QDepth, bestNode.Depth+bestNode.QDepth)
 	fmt.Printf("[YGG] Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
 	fmt.Printf("[YGG] FrontierUnstable:%v QuiescEvals:%v\n", e.FrontierUnstable, e.QEvaluatedNodes)
 
@@ -222,14 +222,13 @@ func (e *Engine) GetColor(inv bool) chess.Color {
 }
 
 // QuiescenceSearch will refine the Score of the Specified Node by extending the Search until a Stable position is found
-func (e *Engine) QuiescenceSearch(node *Node, alpha float32, beta float32, inv bool) float32 {
-	if node.Depth > uint8(MaxQD) {
-		MaxQD = int(node.Depth)
-		fmt.Println("DepthMX:", MaxQD)
+func (e *Engine) QuiescenceSearch(node *Node, qRoot *Node, alpha float32, beta float32, inv bool) float32 {
+	if node.Depth > qRoot.QDepth {
+		qRoot.QDepth = node.Depth
 	}
 	e.QEvaluatedNodes++
 	e.simulateToNode(node)
-	standingPat := EvalStatic(e.Simulation, chess.White)
+	standingPat := EvalStatic(e.Simulation, e.GetColor(inv))
 	if standingPat >= beta {
 		return beta
 	}
@@ -241,7 +240,7 @@ func (e *Engine) QuiescenceSearch(node *Node, alpha float32, beta float32, inv b
 	for _, nd := range unstable {
 		alloc := *nd
 		e.simulateToNode(&alloc)
-		ev := -e.QuiescenceSearch(&alloc, -beta, -alpha, !inv)
+		ev := -e.QuiescenceSearch(&alloc, qRoot, -beta, -alpha, !inv)
 		if ev >= beta {
 			return beta
 		}
@@ -314,7 +313,7 @@ func (n *Node) Evaluate(e *Engine, alpha float32, beta float32, inv bool) float3
 	// if it is unstable begin Quiescence
 	if len(unstableLeaves) > 0 {
 		e.FrontierUnstable++
-		score = e.QuiescenceSearch(n, alpha, beta, inv)
+		score = e.QuiescenceSearch(n, n, alpha, beta, inv)
 		// if the node is stable perform Static Evaluation
 	} else {
 		score = EvalStatic(e.Simulation, e.Color)
