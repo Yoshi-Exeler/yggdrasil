@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"time"
 
@@ -33,10 +32,10 @@ var TxEval = uint(0)
 var CnEval = 0
 
 // MaxScore is Bigger than the Maximum Score Reachable
-const MaxScore = float64(3000)
+const MaxScore = float32(3000)
 
 // MinScore is Smaller than the Minimum Score Reachable
-const MinScore = float64(-3000)
+const MinScore = float32(-3000)
 
 // Engine is the Minimax Engine
 type Engine struct {
@@ -54,7 +53,7 @@ type Engine struct {
 	FrontierUnstable   uint
 	QEvaluatedNodes    uint
 	QDepth             uint
-	PositionCache      map[[16]byte]float64
+	EvaluationCache    map[[16]byte]float32
 }
 
 // Node is a node in the Engine
@@ -63,14 +62,14 @@ type Node struct {
 	Value           *chess.Move
 	Leaves          []*Node
 	LeavesGenerated bool
-	StatusIsEnd     bool
+	StatusEval      float32
 	StatusChecked   bool
 }
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(g *chess.Game, clr chess.Color) *Engine {
 	pos := *g.Position()
-	return &Engine{UseOpeningTheory: false, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil}, PositionCache: make(map[[16]byte]float64)}
+	return &Engine{UseOpeningTheory: false, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil}, EvaluationCache: make(map[[16]byte]float32)}
 }
 
 // DoPerft Will generate the full tree up to the Given Depth
@@ -226,7 +225,7 @@ func (e *Engine) GetColor(inv bool) chess.Color {
 }
 
 // QuiescenceSearch will refine the Score of the Specified Node by extending the Search until a Stable position is found
-func (e *Engine) QuiescenceSearch(node *Node, alpha float64, beta float64, inv bool) float64 {
+func (e *Engine) QuiescenceSearch(node *Node, alpha float32, beta float32, inv bool) float32 {
 	e.QEvaluatedNodes++
 	e.simulateToNode(node)
 	standingPat := EvalStatic(e.Simulation, e.GetColor(inv))
@@ -250,17 +249,14 @@ func (e *Engine) QuiescenceSearch(node *Node, alpha float64, beta float64, inv b
 }
 
 // MinimaxPruning will traverse the Tree using the Minimax Algorithm with Alpa/Beta Pruning
-func (e *Engine) MinimaxPruning(node *Node, alpha float64, beta float64, depth uint, max bool) (*Node, float64) {
+func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth uint, max bool) (*Node, float32) {
 	e.Visited++
-	if depth == 0 || e.NodeIsEndOfGame(node) {
-		us := node.GetUnstableLeaves(e)
-		if len(us) != 0 {
-			e.FrontierUnstable++
-			ev := e.QuiescenceSearch(node, alpha, beta, false)
-			e.QDepth = 0
-			return node, ev
+	if depth == 0 {
+		nseval := e.NodeStatusScore(node)
+		if nseval > -1 {
+			return node, nseval
 		}
-		return node, node.Evaluate(e)
+		return node, node.Evaluate(e, alpha, beta, false)
 	}
 	if max {
 		best := MinScore
@@ -273,7 +269,7 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float64, beta float64, depth u
 				best = ev
 				bestNode = nod
 			}
-			alpha = math.Max(alpha, ev)
+			alpha = f32max(alpha, ev)
 			if beta <= alpha {
 				break
 			}
@@ -290,52 +286,72 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float64, beta float64, depth u
 			worst = ev
 			worstNode = nod
 		}
-		beta = math.Min(beta, ev)
+		beta = f32min(beta, ev)
 	}
 	return worstNode, worst
 }
 
-// Evaluate will return the Evaluation of the Node
-func (n *Node) Evaluate(e *Engine) float64 {
+// Evaluate will return the Evaluation of the Node, using QuiescenseSearch if applicable
+func (n *Node) Evaluate(e *Engine, alpha float32, beta float32, inv bool) float32 {
 	// Simulate the State of this Node
 	e.simulateToNode(n)
 	// Hash the Current Position
 	posHash := e.Simulation.Hash()
 	// Get the Value for this Hash
-	storedV := e.PositionCache[posHash]
+	storedV := e.EvaluationCache[posHash]
 	// If we have a stored value for this Hash return it
 	if storedV != 0 {
 		e.LoadedFromPosCache++
 		return storedV
 	}
-	// If no stored value exist, Evaluate the Node
-	ev := EvalStatic(e.Simulation, e.Color)
+	score := float32(0)
+	// Check wether or not this node is stable
+	unstableLeaves := n.GetUnstableLeaves(e)
+	// if it is unstable begin Quiescence
+	if len(unstableLeaves) > 0 {
+		e.FrontierUnstable++
+		score = e.QuiescenceSearch(n, alpha, beta, inv)
+		// if the node is stable perform Static Evaluation
+	} else {
+		score = EvalStatic(e.Simulation, e.Color)
+	}
+
 	// Save this Evaluation to the Cache
 	e.EvaluatedNodes++
-	e.PositionCache[posHash] = ev
-	return ev
+	e.EvaluationCache[posHash] = score
+	return score
 }
 
-// NodeIsEndOfGame Returns wether or not the Game is over in this position
-func (e *Engine) NodeIsEndOfGame(n *Node) bool {
+// NodeStatusScore Returns the Status evaluation of this node
+func (e *Engine) NodeStatusScore(n *Node) float32 {
 	// if this is the root dont check
 	if n.Value == nil {
-		return false
+		return -1
 	}
 	// if this has a status
 	if n.StatusChecked {
-		return n.StatusIsEnd
+		return n.StatusEval
 	}
 	e.resetSimulation()
 	e.simulateToNode(n)
-	n.StatusIsEnd = statusIsEnd(e.Simulation.Status())
+	n.StatusEval = statusEval(e.Simulation.Status())
 	n.StatusChecked = true
-	return n.StatusIsEnd
+	return n.StatusEval
 }
 
 // statusIsEnd will return wether or not the specified method ends the game
 func statusIsEnd(s chess.Method) bool {
 	return (s == chess.Checkmate || s == chess.Stalemate)
+}
+
+func statusEval(s chess.Method) float32 {
+	if s == chess.Checkmate {
+		return 1000.0
+	}
+	if s == chess.Stalemate {
+		return 0
+	}
+	return -1
 }
 
 // reverseSequence will generate the inverse of the Specified Sequence
@@ -359,7 +375,7 @@ func (n *Node) IsCheck() bool {
 	return n.Value.HasTag(chess.Check)
 }
 
-// GetUnstableLeaves Returns wether or not Immediate Recaptures became availabe through the last move
+// GetUnstableLeaves Returns the list of Immediate Recaptures that became availabe through the last move
 func (n *Node) GetUnstableLeaves(e *Engine) []*Node {
 	//pleaves := n.Parent.GetLeaves(e)
 	leaves := n.GetLeaves(e)
@@ -373,21 +389,6 @@ func (n *Node) GetUnstableLeaves(e *Engine) []*Node {
 	n.Leaves = unstable
 	n.LeavesGenerated = true
 	return unstable
-}
-
-// NodeCollectionDelta returns the nodes that are in a but not in b
-func (e *Engine) NodeCollectionDelta(a []*Node, b []*Node) []*Node {
-	mb := make(map[*Node]struct{}, len(b))
-	for _, x := range b {
-		mb[x] = struct{}{}
-	}
-	var diff []*Node
-	for _, x := range a {
-		if _, found := mb[x]; !found {
-			diff = append(diff, x)
-		}
-	}
-	return diff
 }
 
 // GenerateLeaves will generate the leaves of the specified node
@@ -462,7 +463,7 @@ func (n *Node) getSequence(e *Engine) []*chess.Move {
 }
 
 // EvalStatic will evaluate a board
-func EvalStatic(pos *chess.Position, clr chess.Color) float64 {
+func EvalStatic(pos *chess.Position, clr chess.Color) float32 {
 	start := time.Now()
 	// Calculate the Status of this Position
 	status := pos.Status()
@@ -483,4 +484,18 @@ func EvalStatic(pos *chess.Position, clr chess.Color) float64 {
 	TxEval += uint(end.Sub(start))
 	CnEval++
 	return score
+}
+
+func f32min(a float32, b float32) float32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func f32max(a float32, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
 }
