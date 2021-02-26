@@ -59,6 +59,7 @@ type Engine struct {
 // Node is a node in the Engine
 type Node struct {
 	Parent          *Node
+	Depth           uint8
 	Value           *chess.Move
 	Leaves          []*Node
 	LeavesGenerated bool
@@ -69,7 +70,7 @@ type Node struct {
 // NewEngine returns a new Engine from the specified game
 func NewEngine(g *chess.Game, clr chess.Color) *Engine {
 	pos := *g.Position()
-	return &Engine{UseOpeningTheory: false, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil}, EvaluationCache: make(map[[16]byte]float32)}
+	return &Engine{UseOpeningTheory: false, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]float32)}
 }
 
 // DoPerft Will generate the full tree up to the Given Depth
@@ -235,7 +236,11 @@ func (e *Engine) QuiescenceSearch(node *Node, alpha float32, beta float32, inv b
 	if alpha < standingPat {
 		alpha = standingPat
 	}
-	for _, nd := range node.GetUnstableLeaves(e) {
+	// Generate the Unstable Leaves of this node
+	unstable := node.GetUnstableLeaves(e)
+	// Sort them By Expected Score Impact
+	sort.Sort(byMoveVariance(unstable))
+	for _, nd := range unstable {
 		e.simulateToNode(nd)
 		ev := -1 * e.QuiescenceSearch(nd, -1*beta, -1*alpha, !inv)
 		if ev >= beta {
