@@ -255,7 +255,7 @@ func (e *Engine) QuiescenceSearch(node *Node, qRoot *Node, alpha float32, beta f
 func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth uint, max bool) (*Node, float32) {
 	e.Visited++
 	nseval := e.NodeStatusScore(node, max)
-	if nseval > -1 {
+	if nseval > MinScore {
 		return node, nseval
 	}
 	if depth == 0 {
@@ -334,7 +334,7 @@ func (n *Node) Evaluate(e *Engine, alpha float32, beta float32) float32 {
 func (e *Engine) NodeStatusScore(n *Node, inv bool) float32 {
 	// if this is the root dont check
 	if n.Value == nil {
-		return -1
+		return MinScore
 	}
 	// if this has a status
 	if n.StatusChecked {
@@ -362,7 +362,7 @@ func statusEval(s chess.Method, inv bool) float32 {
 	if s == chess.Stalemate {
 		return 0
 	}
-	return -1
+	return MinScore
 }
 
 // reverseSequence will generate the inverse of the Specified Sequence
