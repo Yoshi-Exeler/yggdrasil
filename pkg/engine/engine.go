@@ -185,7 +185,7 @@ func (e *Engine) ResetStats() {
 }
 
 // Search will Search the Tree using Minimax
-func (e *Engine) Search(depth uint) *chess.Move {
+func (e *Engine) Search(depth int) *chess.Move {
 	// Check that we can actually play a move here
 	if statusIsEnd(e.Origin.Status()) {
 		fmt.Println("[YGG] Aborting search, no possible moves exist")
@@ -260,13 +260,13 @@ func (e *Engine) QuiescenceSearch(node *Node, qRoot *Node, alpha float32, beta f
 }
 
 // MinimaxPruning will traverse the Tree using the Minimax Algorithm with Alpa/Beta Pruning
-func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth uint, max bool) (*Node, float32) {
+func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth int, max bool) (*Node, float32) {
 	e.Visited++
 	nseval := e.NodeStatusScore(node, max)
 	if nseval > MinScore {
 		return node, nseval
 	}
-	if depth == 0 {
+	if depth <= 0 && !node.IsCheck() {
 		return node, node.Evaluate(e, alpha, beta, max)
 	}
 	if max {
