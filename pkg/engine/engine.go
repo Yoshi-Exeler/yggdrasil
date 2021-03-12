@@ -226,48 +226,69 @@ func (n *Node) GetInverseMove() *chess.Move {
 	return &chess.Move{S1: n.Value.S2, S2: n.Value.S1}
 }
 
-// QuiescenceSearch will refine the Score of the Specified Node by extending the Search until a Stable position is found
-func (e *Engine) QuiescenceSearch(node *Node, qRoot *Node, alpha float32, beta float32, inv bool) float32 {
-	if node.Depth > qRoot.QDepth {
-		qRoot.QDepth = node.Depth
-	}
+func (e *Engine) QuiescenceSearch(node *Node, alpha float32, beta float32, depth int, max bool) (*Node, float32) {
 	e.QEvaluatedNodes++
-	standingPat := EvalStatic(e.Simulation, e.GetColor(inv))
+	nseval := e.NodeStatusScore(node, max)
+	if nseval > MinScore {
+		return node, nseval
+	}
+	// if this is not a Terminating node, perform standing pat optimization
+	standingPat := node.Parent.EvaluateStatic(e)
 	if standingPat >= beta {
-		//fmt.Printf("%v>>%v>>SPB:%v,%v\n", node.Parent.Value, node.Value, beta, standingPat)
-		//fmt.Printf(e.Simulation.Board().Draw())
-		return beta
+		return node.Parent, beta
 	}
 	if alpha < standingPat {
 		alpha = standingPat
 	}
-	// Generate the Unstable Leaves of this node
-	unstable := node.GetUnstableLeaves(e, inv)
-	for _, nd := range unstable {
-		e.Simulation.Update(nd.Value)
-		ev := -e.QuiescenceSearch(nd, qRoot, -beta, -alpha, !inv)
-		e.Simulation.Update(nd.GetInverseMove())
-		if ev >= beta {
-			//fmt.Printf("%v>>%v>>B:%v\n", nd.Parent.Value, nd.Value, beta)
-			return beta
-		}
-		if ev > alpha {
-			alpha = ev
-		}
+	unstable := node.GetUnstableLeaves(e, max)
+	if len(unstable) == 0 {
+		return node, node.EvaluateStatic(e)
 	}
-	//fmt.Printf("%v>>%v>>A:%v\n", node.Parent.Value, node.Value, alpha)
-	return alpha
+	if max {
+		best := MinScore
+		bestNode := &Node{}
+		unstableLeaves := node.GetUnstableLeaves(e, max)
+		sort.Sort(byMoveVariance(unstableLeaves))
+		for _, child := range unstableLeaves {
+			nod, ev := e.QuiescenceSearch(child, alpha, beta, depth-1, false)
+			if ev > best {
+				best = ev
+				bestNode = nod
+			}
+			alpha = f32max(alpha, ev)
+			if beta <= alpha {
+				break
+			}
+		}
+		return bestNode, best
+	}
+	worst := MaxScore
+	worstNode := &Node{}
+	unstableLeaves := node.GetUnstableLeaves(e, max)
+	sort.Sort(byMoveVariance(unstableLeaves))
+	for _, child := range unstableLeaves {
+		nod, ev := e.QuiescenceSearch(child, alpha, beta, depth-1, true)
+		if ev < worst {
+			worst = ev
+			worstNode = nod
+		}
+		beta = f32min(beta, ev)
+	}
+	return worstNode, worst
 }
 
 // MinimaxPruning will traverse the Tree using the Minimax Algorithm with Alpa/Beta Pruning
 func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth int, max bool) (*Node, float32) {
 	e.Visited++
+	// Test for Ceckmate and Stalemate
 	nseval := e.NodeStatusScore(node, max)
 	if nseval > MinScore {
 		return node, nseval
 	}
+	// If we are at or below depth 0 and not in check, Evaluate this Node
 	if depth <= 0 && !node.IsCheck() {
-		return node, node.Evaluate(e, alpha, beta, max)
+		// Perform Quiescent Evaluation
+		return node, node.Quiescence(e, alpha, beta, depth, max)
 	}
 	if max {
 		best := MinScore
@@ -302,8 +323,29 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 	return worstNode, worst
 }
 
+func (n *Node) EvaluateStatic(e *Engine) float32 {
+	// Simulate the State of this Node
+	e.simulateToNode(n)
+	// Hash the Current Position
+	posHash := e.Simulation.Hash()
+	// Get the Value for this Hash
+	storedV := e.EvaluationCache[posHash]
+	// If we have a stored value for this Hash return it
+	if storedV != 0 {
+		e.LoadedFromPosCache++
+		return storedV
+	}
+	score := float32(0)
+	// Perform Static Evaluation
+	score = EvaluatePosition(e.Simulation, e.Color)
+	// Save this Evaluation to the Cache
+	e.EvaluatedNodes++
+	e.EvaluationCache[posHash] = score
+	return score
+}
+
 // Evaluate will return the Evaluation of the Node, using QuiescenseSearch if applicable
-func (n *Node) Evaluate(e *Engine, alpha float32, beta float32, inv bool) float32 {
+func (n *Node) Quiescence(e *Engine, alpha float32, beta float32, depth int, max bool) float32 {
 	// Simulate the State of this Node
 	e.simulateToNode(n)
 	// Hash the Current Position
@@ -317,14 +359,16 @@ func (n *Node) Evaluate(e *Engine, alpha float32, beta float32, inv bool) float3
 	}
 	score := float32(0)
 	// Check wether or not this node is stable
-	unstableLeaves := n.GetUnstableLeaves(e, inv)
+	unstableLeaves := n.GetUnstableLeaves(e, max)
 	// if it is unstable begin Quiescence
 	if len(unstableLeaves) > 0 {
 		e.FrontierUnstable++
-		score = e.QuiescenceSearch(n, n, alpha, beta, false)
+		var qnode *Node
+		qnode, score = e.QuiescenceSearch(n, alpha, beta, depth, max)
+		n.QDepth = qnode.Depth
 		// if the node is stable perform Static Evaluation
 	} else {
-		score = EvalStatic(e.Simulation, e.Color)
+		score = EvaluatePosition(e.Simulation, e.Color)
 	}
 
 	// Save this Evaluation to the Cache
@@ -480,7 +524,7 @@ func (n *Node) getSequence(e *Engine) []*chess.Move {
 }
 
 // EvalStatic will evaluate a board
-func EvalStatic(pos *chess.Position, clr chess.Color) float32 {
+func EvaluatePosition(pos *chess.Position, clr chess.Color) float32 {
 	start := time.Now()
 	// Calculate the Status of this Position
 	status := pos.Status()

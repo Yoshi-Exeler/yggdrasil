@@ -47,7 +47,7 @@ func Turn() {
 			fmt.Print("White Played: ")
 		}
 		fmt.Println(game.Moves()[len(game.Moves())-1])
-		fmt.Println("Board Evaluation (Black Perspective):", math.Round(float64(engine.EvalStatic(game.Position(), chess.Black))*100)/100)
+		fmt.Println("Board Evaluation (Black Perspective):", math.Round(float64(engine.EvaluatePosition(game.Position(), chess.Black))*100)/100)
 		fmt.Println(engine.NewEngine(game, chess.Black).GetOpeningName())
 		if game.Position().Status() == chess.Checkmate {
 			if wmove {
