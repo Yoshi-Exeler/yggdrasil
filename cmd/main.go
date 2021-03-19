@@ -82,7 +82,7 @@ func Turn() {
 		start := time.Now()
 		eng := engine.NewEngine(game, chess.Black)
 		eng.ResetStats()
-		mv := eng.Search(5)
+		mv := eng.Search()
 		end := time.Now()
 		stime := uint(end.Sub(start))
 		sSec := stime / 1000 / 1000

@@ -39,6 +39,9 @@ const MinScore = float32(-3000)
 
 // Engine is the Minimax Engine
 type Engine struct {
+	SearchMode         uint8 // 1 = SyncFull, 2 = SyncIterative, 3 = AMP
+	Depth              uint8
+	ProcessingTime     time.Duration
 	UseOpeningTheory   bool
 	Game               *chess.Game
 	ECO                *opening.BookECO
@@ -61,6 +64,7 @@ type Node struct {
 	Parent          *Node
 	Depth           uint8
 	QDepth          uint8
+	QNode           *Node
 	Value           *chess.Move
 	Leaves          []*Node
 	LeavesGenerated bool
@@ -71,37 +75,7 @@ type Node struct {
 // NewEngine returns a new Engine from the specified game
 func NewEngine(g *chess.Game, clr chess.Color) *Engine {
 	pos := *g.Position()
-	return &Engine{UseOpeningTheory: false, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]float32)}
-}
-
-// DoPerft Will generate the full tree up to the Given Depth
-func (e *Engine) DoPerft(depth uint) {
-	// Generate the First Layer
-	currentDepth := uint(1)
-	currentLayer := e.Root.GenerateLeaves(e)
-	fmt.Printf("Layer 1 - %v Nodes\n", len(currentLayer))
-	// Generate the Required Layers
-	for {
-		// Proceed to the next layer
-		currentDepth++
-		// Init the Next Layer
-		nextLayer := []*Node{}
-		// For Every Node in the current Layer
-		for _, cnode := range currentLayer {
-			// Generate the Nodes following this node
-			following := cnode.GetLeaves(e)
-			// Append the Follwing Nodes to the Next Layer
-			nextLayer = append(nextLayer, following...)
-		}
-		// Append the Layer to the Tree
-		fmt.Printf("Layer %v - %v Nodes\n", currentDepth, len(nextLayer))
-		// If this Layer is the Lowest Layer we will simulate, Eval All nodes
-		if currentDepth == depth {
-			break
-		}
-		// Set Current
-		currentLayer = nextLayer
-	}
+	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]float32)}
 }
 
 // GetOpeningMove returns an opening theory move from ECO if one exists
@@ -185,7 +159,7 @@ func (e *Engine) ResetStats() {
 }
 
 // Search will Search the Tree using Minimax
-func (e *Engine) Search(depth int) *chess.Move {
+func (e *Engine) Search() *chess.Move {
 	// Check that we can actually play a move here
 	if statusIsEnd(e.Origin.Status()) {
 		fmt.Println("[YGG] Aborting search, no possible moves exist")
@@ -199,15 +173,59 @@ func (e *Engine) Search(depth int) *chess.Move {
 		}
 		e.UseOpeningTheory = false
 	}
-	// Call Minimax
-	bestNode, bestScore := e.MinimaxPruning(e.Root, MinScore, MaxScore, depth, true)
+	var bestNode *Node
+	var bestScore float32
+	switch e.SearchMode {
+	case 1:
+		bestNode, bestScore = e.SearchSynchronousFull(int(e.Depth))
+	case 2:
+		bestNode, bestScore = e.SearchSynchronousIterative(e.ProcessingTime)
+	case 3:
+		bestNode, bestScore = e.SearchAMP(e.ProcessingTime)
+	}
 	// Get the Origin Move of the Best Leaf
 	origin := bestNode.getSequence(e)[0]
-	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v LD:%v\n", bestNode.getSequence(e), bestScore, origin, bestNode.Depth, bestNode.QDepth, bestNode.Depth+bestNode.QDepth)
+	if bestNode.QNode != nil {
+		qorigin := bestNode.QNode.getSequence(e)
+		fmt.Println("[QSEQ:]", qorigin)
+		e.simulateToNode(bestNode.QNode)
+		fmt.Println(e.Simulation.Board().Draw())
+	}
+
+	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v LD:%v\n", bestNode.getSequence(e), bestScore, origin, bestNode.Depth, bestNode.QDepth, u8Max(bestNode.Depth, bestNode.QDepth))
 	fmt.Printf("[YGG] Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
 	fmt.Printf("[YGG] FrontierUnstable:%v QuiescEvals:%v\n", e.FrontierUnstable, e.QEvaluatedNodes)
-
 	return origin
+}
+
+func u8Max(a uint8, b uint8) uint8 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// SearchSynchronousFull will fully search the tree to the Specified Depth
+func (e *Engine) SearchSynchronousFull(depth int) (*Node, float32) {
+	return e.MinimaxPruning(e.Root, MinScore, MaxScore, depth, true)
+}
+
+// SearchSynchronousIterative
+func (e *Engine) SearchSynchronousIterative(processingTime time.Duration) (*Node, float32) {
+	return nil, 0
+}
+
+func (n *Node) SubSearch(e *Engine, processingTime time.Duration) (*Node, float32) {
+	return nil, 0
+}
+
+// SearchAMP will search the position using Asymmetric Multi Processing
+func (e *Engine) SearchAMP(processingTime time.Duration) (*Node, float32) {
+	firstLayer := e.Root.GenerateLeaves(e)
+	for _, nd := range firstLayer {
+		go nd.SubSearch(e, processingTime)
+	}
+	return nil, 0
 }
 
 // GetColor offers the Option to invert colors
@@ -226,55 +244,109 @@ func (n *Node) GetInverseMove() *chess.Move {
 	return &chess.Move{S1: n.Value.S2, S2: n.Value.S1}
 }
 
-func (e *Engine) QuiescenceSearch(node *Node, alpha float32, beta float32, depth int, max bool) (*Node, float32) {
+func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
+	// Increment the Processed Nodes
 	e.QEvaluatedNodes++
+	// Check for Termination
 	nseval := e.NodeStatusScore(node, max)
 	if nseval > MinScore {
-		return node, nseval
+		return nseval
 	}
-	// if this is not a Terminating node, perform standing pat optimization
-	standingPat := node.Parent.EvaluateStatic(e)
-	if standingPat >= beta {
-		return node.Parent, beta
-	}
-	if alpha < standingPat {
-		alpha = standingPat
-	}
-	unstable := node.GetUnstableLeaves(e, max)
-	if len(unstable) == 0 {
-		return node, node.EvaluateStatic(e)
+	// Get the Standing Pat
+	standingPat := e.EvaluateStaticPosition(e.Simulation)
+	// if we are in a max branch
+	if max {
+		// Check if the Standing Pat Causes Beta Cuttof
+		if standingPat >= beta {
+			fmt.Printf("SP(%v)>=BETA(%v)    [%v]\n", standingPat, beta, node.Value)
+			fmt.Println(e.Simulation.Board().Draw())
+			return beta
+		}
+		// Check if the standing pat raises alpha
+		if standingPat > alpha {
+			fmt.Printf("SP(%v)>ALPHA(%v)    [%v]\n", standingPat, alpha, node.Value)
+			fmt.Println(e.Simulation.Board().Draw())
+			alpha = standingPat
+		}
+		// Generate the Unstable Children of the Node, make sure not to influence the sim
+		tmp := *e.Simulation
+		unstable := node.GetUnstableLeaves(e, max)
+		e.Simulation = &tmp
+		// Iterate over the Unstable children of the node
+		for _, child := range unstable {
+			// Dealloc the Iterator
+			alloc := *child
+			// Simulate the Move of the current child
+			e.Simulation = e.Simulation.Update(alloc.Value)
+			// Call Q recursively
+			score := e.Q(&alloc, alpha, beta, !max)
+			// Unsimulate the Move
+			e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
+			// Check if the move causes beta cuttof
+			if score >= beta {
+				fmt.Printf("SC(%v)>=BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
+				fmt.Println(e.Simulation.Board().Draw())
+				return beta
+			}
+			// Check if the Score raises alpha
+			if score > alpha {
+				fmt.Printf("SC(%v)>=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
+				fmt.Println(e.Simulation.Board().Draw())
+				alpha = score
+			}
+		}
+		// if we are in a min branch
+	} else {
+		// Check if the Standing Pat Causes Beta Cuttof
+		if standingPat <= alpha {
+			fmt.Printf("SP(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, node.Value)
+			fmt.Println(e.Simulation.Board().Draw())
+			return alpha
+		}
+		// Check if the standing pat raises alpha
+		if standingPat < beta {
+			fmt.Printf("SP(%v)<BETA(%v)    [%v]\n", standingPat, beta, node.Value)
+			fmt.Println(e.Simulation.Board().Draw())
+			beta = standingPat
+		}
+		// Generate the Unstable Children of the Node
+		tmp := *e.Simulation
+		unstable := node.GetUnstableLeaves(e, max)
+		e.Simulation = &tmp
+		// Iterate over the Unstable children of the node
+		for _, child := range unstable {
+			// Dealloc the Iterator
+			alloc := *child
+			// Simulate the Move of the current child
+			e.Simulation = e.Simulation.Update(alloc.Value)
+			// Call Q recursively
+			score := e.Q(&alloc, alpha, beta, !max)
+			// Unsimulate the Move
+			e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
+			// Check if the move causes beta cuttof
+			if score <= alpha {
+				fmt.Printf("SC(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
+				fmt.Println(e.Simulation.Board().Draw())
+				return alpha
+			}
+			// Check if the Score raises alpha
+			if score < beta {
+				fmt.Printf("SC(%v)<BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
+				fmt.Println(e.Simulation.Board().Draw())
+				beta = score
+			}
+		}
 	}
 	if max {
-		best := MinScore
-		bestNode := &Node{}
-		unstableLeaves := node.GetUnstableLeaves(e, max)
-		sort.Sort(byMoveVariance(unstableLeaves))
-		for _, child := range unstableLeaves {
-			nod, ev := e.QuiescenceSearch(child, alpha, beta, depth-1, false)
-			if ev > best {
-				best = ev
-				bestNode = nod
-			}
-			alpha = f32max(alpha, ev)
-			if beta <= alpha {
-				break
-			}
-		}
-		return bestNode, best
+		fmt.Printf("Return ALPHA(%v)    [%v]\n", alpha, node.Value)
+		fmt.Println(e.Simulation.Board().Draw())
+		return alpha
+	} else {
+		fmt.Printf("Return BETA(%v)    [%v]\n", alpha, node.Value)
+		fmt.Println(e.Simulation.Board().Draw())
+		return beta
 	}
-	worst := MaxScore
-	worstNode := &Node{}
-	unstableLeaves := node.GetUnstableLeaves(e, max)
-	sort.Sort(byMoveVariance(unstableLeaves))
-	for _, child := range unstableLeaves {
-		nod, ev := e.QuiescenceSearch(child, alpha, beta, depth-1, true)
-		if ev < worst {
-			worst = ev
-			worstNode = nod
-		}
-		beta = f32min(beta, ev)
-	}
-	return worstNode, worst
+
 }
 
 // MinimaxPruning will traverse the Tree using the Minimax Algorithm with Alpa/Beta Pruning
@@ -296,7 +368,7 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 		leaves := node.GetLeaves(e)
 		sort.Sort(byMoveVariance(leaves))
 		for _, child := range leaves {
-			nod, ev := e.MinimaxPruning(child, alpha, beta, depth-1, false)
+			nod, ev := e.MinimaxPruning(child, alpha, beta, depth-1, !max)
 			if ev > best {
 				best = ev
 				bestNode = nod
@@ -313,7 +385,7 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 	leaves := node.GetLeaves(e)
 	sort.Sort(byMoveVariance(leaves))
 	for _, child := range leaves {
-		nod, ev := e.MinimaxPruning(child, alpha, beta, depth-1, true)
+		nod, ev := e.MinimaxPruning(child, alpha, beta, depth-1, !max)
 		if ev < worst {
 			worst = ev
 			worstNode = nod
@@ -321,6 +393,25 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 		beta = f32min(beta, ev)
 	}
 	return worstNode, worst
+}
+
+func (e *Engine) EvaluateStaticPosition(pos *chess.Position) float32 {
+	// Hash the Current Position
+	posHash := pos.Hash()
+	// Get the Value for this Hash
+	storedV := e.EvaluationCache[posHash]
+	// If we have a stored value for this Hash return it
+	if storedV != 0 {
+		e.LoadedFromPosCache++
+		return storedV
+	}
+	score := float32(0)
+	// Perform Static Evaluation
+	score = EvaluatePosition(e.Simulation, e.Color)
+	// Save this Evaluation to the Cache
+	e.EvaluatedNodes++
+	e.EvaluationCache[posHash] = score
+	return score
 }
 
 func (n *Node) EvaluateStatic(e *Engine) float32 {
@@ -359,13 +450,15 @@ func (n *Node) Quiescence(e *Engine, alpha float32, beta float32, depth int, max
 	}
 	score := float32(0)
 	// Check wether or not this node is stable
+	tmp := *e.Simulation
 	unstableLeaves := n.GetUnstableLeaves(e, max)
+	e.Simulation = &tmp
 	// if it is unstable begin Quiescence
 	if len(unstableLeaves) > 0 {
 		e.FrontierUnstable++
-		var qnode *Node
-		qnode, score = e.QuiescenceSearch(n, alpha, beta, depth, max)
-		n.QDepth = qnode.Depth
+		fmt.Println("BEGIN_Q_", n.Value)
+		fmt.Println(e.Simulation.Board().Draw())
+		score = e.Q(n, alpha, beta, max)
 		// if the node is stable perform Static Evaluation
 	} else {
 		score = EvaluatePosition(e.Simulation, e.Color)
@@ -430,12 +523,15 @@ func (n *Node) GetLeaves(e *Engine) []*Node {
 
 // IsCheck returns if a node is a checking node
 func (n *Node) IsCheck() bool {
+	if n == nil || n.Value == nil {
+		return false
+	}
 	return n.Value.HasTag(chess.Check)
 }
 
 // GetUnstableLeaves Returns the list of Immediate Recaptures that became availabe through the last move
 func (n *Node) GetUnstableLeaves(e *Engine, inv bool) []*Node {
-	// Return an empty list if the Node is a terminating node
+	// Return an empty list if the Node is a terminating node, this could be optimized by only calling this from a safe ctx
 	nseval := e.NodeStatusScore(n, inv)
 	if nseval > MinScore {
 		return make([]*Node, 0)
@@ -443,7 +539,7 @@ func (n *Node) GetUnstableLeaves(e *Engine, inv bool) []*Node {
 	leaves := n.GetLeaves(e)
 	unstable := []*Node{}
 	for _, nd := range leaves {
-		if nd.Value.HasTag(chess.Capture) {
+		if nd.Value.HasTag(chess.Capture) || nd.Value.HasTag(chess.Check) {
 			unstable = append(unstable, nd)
 		}
 	}
