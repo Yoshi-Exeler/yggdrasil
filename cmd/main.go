@@ -64,20 +64,21 @@ func Turn() {
 		}
 	}
 	if wmove {
-		//MakeRandomMove()
+		MakeRandomMove()
 
 		//tree := engine.NewEngine(game, chess.White)
 		//mv := tree.SearchMinimax(4)
 		//game.Move(mv)
 
 		wmove = !wmove
-	w_begin_input:
+		/*w_begin_input:
 		inp := SpaceMap(ReadSTDIN())
 		err := game.MoveStr(inp)
 		if err != nil {
 			fmt.Printf("Your input was invalid, error: %v\n", err)
 			goto w_begin_input
 		}
+		*/
 	} else {
 		start := time.Now()
 		eng := engine.NewEngine(game, chess.Black)

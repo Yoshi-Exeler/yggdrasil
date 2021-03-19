@@ -277,6 +277,8 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 			// Dealloc the Iterator
 			alloc := *child
 			// Simulate the Move of the current child
+			fmt.Println("PRE_UPDATE", alloc)
+			fmt.Println("Board\n", e.Simulation.Board().Draw())
 			e.Simulation = e.Simulation.Update(alloc.Value)
 			// Call Q recursively
 			score := e.Q(&alloc, alpha, beta, !max)
@@ -284,14 +286,14 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 			e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
 			// Check if the move causes beta cuttof
 			if score >= beta {
-				fmt.Printf("SC(%v)>=BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
-				fmt.Println(e.Simulation.Board().Draw())
+				//fmt.Printf("SC(%v)>=BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
+				//fmt.Println(e.Simulation.Board().Draw())
 				return beta
 			}
 			// Check if the Score raises alpha
 			if score > alpha {
-				fmt.Printf("SC(%v)>=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
-				fmt.Println(e.Simulation.Board().Draw())
+				//fmt.Printf("SC(%v)>=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
+				//fmt.Println(e.Simulation.Board().Draw())
 				alpha = score
 			}
 		}
@@ -299,14 +301,14 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 	} else {
 		// Check if the Standing Pat Causes Beta Cuttof
 		if standingPat <= alpha {
-			fmt.Printf("SP(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, node.Value)
-			fmt.Println(e.Simulation.Board().Draw())
+			//fmt.Printf("SP(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, node.Value)
+			//fmt.Println(e.Simulation.Board().Draw())
 			return alpha
 		}
 		// Check if the standing pat raises alpha
 		if standingPat < beta {
-			fmt.Printf("SP(%v)<BETA(%v)    [%v]\n", standingPat, beta, node.Value)
-			fmt.Println(e.Simulation.Board().Draw())
+			//fmt.Printf("SP(%v)<BETA(%v)    [%v]\n", standingPat, beta, node.Value)
+			//fmt.Println(e.Simulation.Board().Draw())
 			beta = standingPat
 		}
 		// Generate the Unstable Children of the Node
@@ -317,6 +319,8 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 		for _, child := range unstable {
 			// Dealloc the Iterator
 			alloc := *child
+			//fmt.Println("PRE_UPDATE", alloc)
+			//fmt.Println("Board\n", e.Simulation.Board().Draw())
 			// Simulate the Move of the current child
 			e.Simulation = e.Simulation.Update(alloc.Value)
 			// Call Q recursively
@@ -325,25 +329,25 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 			e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
 			// Check if the move causes beta cuttof
 			if score <= alpha {
-				fmt.Printf("SC(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
-				fmt.Println(e.Simulation.Board().Draw())
+				//fmt.Printf("SC(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
+				//fmt.Println(e.Simulation.Board().Draw())
 				return alpha
 			}
 			// Check if the Score raises alpha
 			if score < beta {
-				fmt.Printf("SC(%v)<BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
-				fmt.Println(e.Simulation.Board().Draw())
+				//fmt.Printf("SC(%v)<BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
+				//fmt.Println(e.Simulation.Board().Draw())
 				beta = score
 			}
 		}
 	}
 	if max {
-		fmt.Printf("Return ALPHA(%v)    [%v]\n", alpha, node.Value)
-		fmt.Println(e.Simulation.Board().Draw())
+		//fmt.Printf("Return ALPHA(%v)    [%v]\n", alpha, node.Value)
+		//fmt.Println(e.Simulation.Board().Draw())
 		return alpha
 	} else {
-		fmt.Printf("Return BETA(%v)    [%v]\n", alpha, node.Value)
-		fmt.Println(e.Simulation.Board().Draw())
+		//fmt.Printf("Return BETA(%v)    [%v]\n", alpha, node.Value)
+		//fmt.Println(e.Simulation.Board().Draw())
 		return beta
 	}
 
