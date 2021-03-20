@@ -6,3 +6,24 @@ Li wins in 32 by Checkmate
 
 Yggdrasil vs Isabel(1600)
 Yggdrasil reaches a draw in a winning position after 55 Moves
+
+
+Yggdrasil 1.1 VS Li(2000)
+[Event "vs Computer"]
+[Site "Chess.com"]
+[Date "2021.03.19"]
+[Round "?"]
+[White "Li"]
+[Black "Guest"]
+[Result "0-1"]
+[TimeControl "-"]
+
+1. Nf3 c5 2. c4 Qa5 3. e4 h5 4. e5 d6 5. Nc3 Nc6 6. exd6 exd6 7. Qe2+ Nge7 8.
+Nd5 Rh6 9. b4 Nxb4 10. Nxb4 Re6 11. Nc2 Rxe2+ 12. Bxe2 g6 13. Bb2 Bh6 14. O-O
+Bxd2 15. Ne3 Bg4 16. Nxg4 hxg4 17. Nh4 g5 18. Nf3 gxf3 19. Bxf3 Rb8 20. Rfd1 b5
+21. cxb5 Rxb5 22. Bf6 Bc3 23. Bxc3 Qxc3 24. Rac1 Qa3 25. Bh5 a5 26. Re1 Qxa2 27.
+Rcd1 a4 28. Rxd6 Rb1 29. Rdd1 Rxd1 30. Rxd1 a3 31. Bg4 Nd5 32. Re1+ Kd8 33. Rd1
+Qb3 34. g3 Qxd1+ 35. Bxd1 a2 36. Bb3 a1=Q+ 37. Kg2 Qa8 38. Kg1 Nb6 39. Bxf7 Qe4
+40. h4 gxh4 41. gxh4 Qf3 42. Be6 Qe4 43. Bh3 Qxh4 44. Bg2 Nc4 45. Bc6 Ne5 46.
+Ba8 Nd3 47. Kg2 Qg4+ 48. Kf1 Nf4 49. Bf3 Qxf3 50. Ke1 Qe2# 0-1
+Yggdrasil wins by Checkmate in 50 Moves

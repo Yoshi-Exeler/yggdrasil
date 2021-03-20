@@ -75,7 +75,7 @@ type Node struct {
 // NewEngine returns a new Engine from the specified game
 func NewEngine(g *chess.Game, clr chess.Color) *Engine {
 	pos := *g.Position()
-	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]float32)}
+	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]float32)}
 }
 
 // GetOpeningMove returns an opening theory move from ECO if one exists
@@ -258,14 +258,14 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 	if max {
 		// Check if the Standing Pat Causes Beta Cuttof
 		if standingPat >= beta {
-			fmt.Printf("SP(%v)>=BETA(%v)    [%v]\n", standingPat, beta, node.Value)
-			fmt.Println(e.Simulation.Board().Draw())
+			//fmt.Printf("SP(%v)>=BETA(%v)    [%v]\n", standingPat, beta, node.Value)
+			//fmt.Println(e.Simulation.Board().Draw())
 			return beta
 		}
 		// Check if the standing pat raises alpha
 		if standingPat > alpha {
-			fmt.Printf("SP(%v)>ALPHA(%v)    [%v]\n", standingPat, alpha, node.Value)
-			fmt.Println(e.Simulation.Board().Draw())
+			//fmt.Printf("SP(%v)>ALPHA(%v)    [%v]\n", standingPat, alpha, node.Value)
+			//fmt.Println(e.Simulation.Board().Draw())
 			alpha = standingPat
 		}
 		// Generate the Unstable Children of the Node, make sure not to influence the sim
@@ -277,13 +277,16 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 			// Dealloc the Iterator
 			alloc := *child
 			// Simulate the Move of the current child
-			fmt.Println("PRE_UPDATE", alloc)
-			fmt.Println("Board\n", e.Simulation.Board().Draw())
+			//fmt.Println("PRE_UPDATE", alloc)
+			//fmt.Println("Board\n", e.Simulation.Board().Draw())
+			psnap := *e.Simulation
 			e.Simulation = e.Simulation.Update(alloc.Value)
+
 			// Call Q recursively
 			score := e.Q(&alloc, alpha, beta, !max)
 			// Unsimulate the Move
-			e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
+			//e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
+			e.Simulation = &psnap
 			// Check if the move causes beta cuttof
 			if score >= beta {
 				//fmt.Printf("SC(%v)>=BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
@@ -322,11 +325,13 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 			//fmt.Println("PRE_UPDATE", alloc)
 			//fmt.Println("Board\n", e.Simulation.Board().Draw())
 			// Simulate the Move of the current child
+			psnap := *e.Simulation
 			e.Simulation = e.Simulation.Update(alloc.Value)
 			// Call Q recursively
 			score := e.Q(&alloc, alpha, beta, !max)
 			// Unsimulate the Move
-			e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
+			//e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
+			e.Simulation = &psnap
 			// Check if the move causes beta cuttof
 			if score <= alpha {
 				//fmt.Printf("SC(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
@@ -460,8 +465,8 @@ func (n *Node) Quiescence(e *Engine, alpha float32, beta float32, depth int, max
 	// if it is unstable begin Quiescence
 	if len(unstableLeaves) > 0 {
 		e.FrontierUnstable++
-		fmt.Println("BEGIN_Q_", n.Value)
-		fmt.Println(e.Simulation.Board().Draw())
+		//fmt.Println("BEGIN_Q_", n.Value)
+		//fmt.Println(e.Simulation.Board().Draw())
 		score = e.Q(n, alpha, beta, max)
 		// if the node is stable perform Static Evaluation
 	} else {
