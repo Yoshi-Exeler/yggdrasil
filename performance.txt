@@ -104,3 +104,11 @@ Generated: 1.486.677 Visited: 157.337 Evaluated: 69.326 LoadedFromCache: 27.502
 Search Completed in 1520ms
 Generation Space Reduction: 85.4% Evaluation Space Reduction 98.4%
 Searched 10.190.777 Nodes in 1520 Seconds @ 6.704.458 enps
+
+
+Minimax_ABD_Quiesc: ()
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine: [e7e6 b1c3 g8f6 f1c4 f6e4]

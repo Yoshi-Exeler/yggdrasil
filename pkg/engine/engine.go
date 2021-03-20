@@ -22,13 +22,9 @@ import (
 *
  */
 
-var TxReset = uint(0)
 var CnReset = 0
-var TxGetSeq = uint(0)
 var CnGetSeq = 0
-var TxSTN = uint(0)
 var CnSTN = 0
-var TxEval = uint(0)
 var CnEval = 0
 
 // MaxScore is Bigger than the Maximum Score Reachable
@@ -50,6 +46,7 @@ type Engine struct {
 	Root               *Node
 	Color              chess.Color
 	GeneratedNodes     uint
+	QGeneratedNodes    uint
 	EvaluatedNodes     uint
 	Visited            uint
 	LoadedFromPosCache uint
@@ -75,7 +72,7 @@ type Node struct {
 // NewEngine returns a new Engine from the specified game
 func NewEngine(g *chess.Game, clr chess.Color) *Engine {
 	pos := *g.Position()
-	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]float32)}
+	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]float32)}
 }
 
 // GetOpeningMove returns an opening theory move from ECO if one exists
@@ -105,6 +102,7 @@ func (e *Engine) GetOpeningMove() *chess.Move {
 	return nil
 }
 
+// TODO: integrate this into GetOpeningMove to save a lookup
 // GetOpeningName returns the current theory name
 func (e *Engine) GetOpeningName() string {
 	prevMoves := e.Game.Moves()
@@ -258,14 +256,10 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 	if max {
 		// Check if the Standing Pat Causes Beta Cuttof
 		if standingPat >= beta {
-			//fmt.Printf("SP(%v)>=BETA(%v)    [%v]\n", standingPat, beta, node.Value)
-			//fmt.Println(e.Simulation.Board().Draw())
 			return beta
 		}
 		// Check if the standing pat raises alpha
 		if standingPat > alpha {
-			//fmt.Printf("SP(%v)>ALPHA(%v)    [%v]\n", standingPat, alpha, node.Value)
-			//fmt.Println(e.Simulation.Board().Draw())
 			alpha = standingPat
 		}
 		// Generate the Unstable Children of the Node, make sure not to influence the sim
@@ -277,26 +271,19 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 			// Dealloc the Iterator
 			alloc := *child
 			// Simulate the Move of the current child
-			//fmt.Println("PRE_UPDATE", alloc)
-			//fmt.Println("Board\n", e.Simulation.Board().Draw())
 			psnap := *e.Simulation
 			e.Simulation = e.Simulation.Update(alloc.Value)
 
 			// Call Q recursively
 			score := e.Q(&alloc, alpha, beta, !max)
 			// Unsimulate the Move
-			//e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
 			e.Simulation = &psnap
 			// Check if the move causes beta cuttof
 			if score >= beta {
-				//fmt.Printf("SC(%v)>=BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
-				//fmt.Println(e.Simulation.Board().Draw())
 				return beta
 			}
 			// Check if the Score raises alpha
 			if score > alpha {
-				//fmt.Printf("SC(%v)>=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
-				//fmt.Println(e.Simulation.Board().Draw())
 				alpha = score
 			}
 		}
@@ -304,14 +291,10 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 	} else {
 		// Check if the Standing Pat Causes Beta Cuttof
 		if standingPat <= alpha {
-			//fmt.Printf("SP(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, node.Value)
-			//fmt.Println(e.Simulation.Board().Draw())
 			return alpha
 		}
 		// Check if the standing pat raises alpha
 		if standingPat < beta {
-			//fmt.Printf("SP(%v)<BETA(%v)    [%v]\n", standingPat, beta, node.Value)
-			//fmt.Println(e.Simulation.Board().Draw())
 			beta = standingPat
 		}
 		// Generate the Unstable Children of the Node
@@ -322,37 +305,26 @@ func (e *Engine) Q(node *Node, alpha float32, beta float32, max bool) float32 {
 		for _, child := range unstable {
 			// Dealloc the Iterator
 			alloc := *child
-			//fmt.Println("PRE_UPDATE", alloc)
-			//fmt.Println("Board\n", e.Simulation.Board().Draw())
 			// Simulate the Move of the current child
 			psnap := *e.Simulation
 			e.Simulation = e.Simulation.Update(alloc.Value)
 			// Call Q recursively
 			score := e.Q(&alloc, alpha, beta, !max)
 			// Unsimulate the Move
-			//e.Simulation = e.Simulation.Update(alloc.GetInverseMove())
 			e.Simulation = &psnap
 			// Check if the move causes beta cuttof
 			if score <= alpha {
-				//fmt.Printf("SC(%v)<=ALPHA(%v)    [%v]\n", standingPat, alpha, alloc.Value)
-				//fmt.Println(e.Simulation.Board().Draw())
 				return alpha
 			}
 			// Check if the Score raises alpha
 			if score < beta {
-				//fmt.Printf("SC(%v)<BETA(%v)    [%v]\n", standingPat, beta, alloc.Value)
-				//fmt.Println(e.Simulation.Board().Draw())
 				beta = score
 			}
 		}
 	}
 	if max {
-		//fmt.Printf("Return ALPHA(%v)    [%v]\n", alpha, node.Value)
-		//fmt.Println(e.Simulation.Board().Draw())
 		return alpha
 	} else {
-		//fmt.Printf("Return BETA(%v)    [%v]\n", alpha, node.Value)
-		//fmt.Println(e.Simulation.Board().Draw())
 		return beta
 	}
 
@@ -369,7 +341,7 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 	// If we are at or below depth 0 and not in check, Evaluate this Node
 	if depth <= 0 && !node.IsCheck() {
 		// Perform Quiescent Evaluation
-		return node, node.Quiescence(e, alpha, beta, depth, max)
+		return node, node.EvaluateWithQuiescence(e, alpha, beta, depth, max)
 	}
 	if max {
 		best := MinScore
@@ -404,6 +376,7 @@ func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 	return worstNode, worst
 }
 
+// EvaluateStaticPosition will evaluate a Position statically, if an evaluation exists in the Hashtable, it is loaded instead
 func (e *Engine) EvaluateStaticPosition(pos *chess.Position) float32 {
 	// Hash the Current Position
 	posHash := pos.Hash()
@@ -418,34 +391,13 @@ func (e *Engine) EvaluateStaticPosition(pos *chess.Position) float32 {
 	// Perform Static Evaluation
 	score = EvaluatePosition(e.Simulation, e.Color)
 	// Save this Evaluation to the Cache
-	e.EvaluatedNodes++
+	e.QEvaluatedNodes++
 	e.EvaluationCache[posHash] = score
 	return score
 }
 
-func (n *Node) EvaluateStatic(e *Engine) float32 {
-	// Simulate the State of this Node
-	e.simulateToNode(n)
-	// Hash the Current Position
-	posHash := e.Simulation.Hash()
-	// Get the Value for this Hash
-	storedV := e.EvaluationCache[posHash]
-	// If we have a stored value for this Hash return it
-	if storedV != 0 {
-		e.LoadedFromPosCache++
-		return storedV
-	}
-	score := float32(0)
-	// Perform Static Evaluation
-	score = EvaluatePosition(e.Simulation, e.Color)
-	// Save this Evaluation to the Cache
-	e.EvaluatedNodes++
-	e.EvaluationCache[posHash] = score
-	return score
-}
-
-// Evaluate will return the Evaluation of the Node, using QuiescenseSearch if applicable
-func (n *Node) Quiescence(e *Engine, alpha float32, beta float32, depth int, max bool) float32 {
+// EvaluateWithQuiescence will return the Evaluation of the Node, using QuiescenseSearch if applicable
+func (n *Node) EvaluateWithQuiescence(e *Engine, alpha float32, beta float32, depth int, max bool) float32 {
 	// Simulate the State of this Node
 	e.simulateToNode(n)
 	// Hash the Current Position
@@ -485,13 +437,15 @@ func (e *Engine) NodeStatusScore(n *Node, inv bool) float32 {
 	if n.Value == nil {
 		return MinScore
 	}
-	// if this has a status
+	// if this has a status already calculated, return it
 	if n.StatusChecked {
 		return n.StatusEval
 	}
-	e.resetSimulation()
+	// Simulate to the Node
 	e.simulateToNode(n)
+	// Evaluate the Status of the node using the specified inversion
 	n.StatusEval = statusEval(e.Simulation.Status(), inv)
+	// Set a flag that the status was evaluated so we dont evaluate again
 	n.StatusChecked = true
 	return n.StatusEval
 }
@@ -578,7 +532,6 @@ func (n *Node) GenerateLeaves(e *Engine) []*Node {
 }
 
 func (e *Engine) simulateToNode(n *Node) {
-	start := time.Now()
 	// Reset the Simulation to the Origin
 	e.resetSimulation()
 	// If this is the Root node we stop now, nothing todo
@@ -591,24 +544,18 @@ func (e *Engine) simulateToNode(n *Node) {
 	for _, ms := range seq {
 		e.Simulation = e.Simulation.Update((ms))
 	}
-	end := time.Now()
-	TxSTN += uint(end.Sub(start))
 	CnSTN++
 }
 
 // resetSimulation will reset the Simulated game to the original state
 func (e *Engine) resetSimulation() {
-	start := time.Now()
 	npos := e.Origin
 	e.Simulation = &npos
-	end := time.Now()
-	TxReset += uint(end.Sub(start))
 	CnReset++
 }
 
 // getSequence will return the full sequence of moves required to get to this node including the move of this node
 func (n *Node) getSequence(e *Engine) []*chess.Move {
-	start := time.Now()
 	seq := make([]*chess.Move, 0)
 	cnode := n
 	for {
@@ -622,15 +569,12 @@ func (n *Node) getSequence(e *Engine) []*chess.Move {
 		cnode = cnode.Parent
 	}
 	rev := reverseSequence(seq)
-	end := time.Now()
-	TxGetSeq += uint(end.Sub(start))
 	CnGetSeq++
 	return rev
 }
 
 // EvalStatic will evaluate a board
 func EvaluatePosition(pos *chess.Position, clr chess.Color) float32 {
-	start := time.Now()
 	// Calculate the Status of this Position
 	status := pos.Status()
 	// Calculate the Score of this Position
@@ -646,8 +590,6 @@ func EvaluatePosition(pos *chess.Position, clr chess.Color) float32 {
 	if status == chess.Stalemate {
 		return 0
 	}
-	end := time.Now()
-	TxEval += uint(end.Sub(start))
 	CnEval++
 	return score
 }
