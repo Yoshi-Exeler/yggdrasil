@@ -112,3 +112,7 @@ Begin Game
 White Plays e4
 Engine Searches with Depth 5
 Optimal Path According to the Engine: [e7e6 b1c3 g8f6 f1c4 f6e4]
+Generated: 2.311.355 Visited: 381.294 Evaluated: 37.303 LoadedFromCache: 119.881
+Generation Space Reduction: 77,31% Static Evaluation Space Reduction 99,63%
+QGenerated: 8.288.570 QVisited: 307.435 QEvaluated: 276.841 FrontierUnstable: 141.147
+Search Completed in 8804ms
