@@ -1,3 +1,4 @@
+Version 1
 Yggdrasil vs Emir(1000) 
 Yggdrasil wins in 29 by Checkmate
 
@@ -8,6 +9,7 @@ Yggdrasil vs Isabel(1600)
 Yggdrasil reaches a draw in a winning position after 55 Moves
 
 
+Version 1.1
 Yggdrasil 1.1 VS Li(2000)
 [Event "vs Computer"]
 [Site "Chess.com"]
