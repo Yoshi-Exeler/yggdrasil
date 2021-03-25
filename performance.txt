@@ -167,3 +167,17 @@ QGenerated: 411.453 QVisited: 228.128 QEvaluated: 197.837 FrontierUnstable: 89.4
 Raw Evaluation Speed: 52.293 NPS
 Effective Search Speed: 2.429.846 NPS
 Search Completed in 4194ms
+
+Minimax_ABD_Quiesc_Int16: (Raw: -3.064 NPS, Effective: +1.162.250 NPS, Generation Space Reducion: +2,24%)
+// Switch Score datatype to int16
+Engine Plays Black
+Begin Game
+White Plays e4
+Engine Searches with Depth 5
+Optimal Path According to the Engine:[b8c6 f1c4 g8f6 d1f3 c6d4]
+Generated:390104 Visited:118362 Evaluated:139665 LoadedFromCache:51843
+Generation Space Reduction: 96,17%
+QGenerated:272667 QVisited:150479 QEvaluated:0 FrontierUnstable:55286
+Raw Evaluation Speed: 49.229 NPS
+Effective Search Speed: 3.592.096 NPS
+Search Completed in 2837ms

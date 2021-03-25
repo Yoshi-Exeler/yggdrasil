@@ -71,7 +71,7 @@ type Node struct {
 // NewEngine returns a new Engine from the specified game
 func NewEngine(g *chess.Game, clr chess.Color) *Engine {
 	pos := *g.Position()
-	return &Engine{UseOpeningTheory: true, Depth: 5, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]int16)}
+	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]int16)}
 }
 
 // GetOpeningMove returns an opening theory move from ECO if one exists
