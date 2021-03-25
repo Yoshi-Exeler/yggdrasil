@@ -1,9 +1,7 @@
-github.com/Yoshi-Exeler/chesslib v0.0.0-20210323182238-8284ec40f8ce h1:2KZH4sI3PmOR1ztmgQIDFBJy+FXGgD5q6+jgTfvklVc=
-github.com/Yoshi-Exeler/chesslib v0.0.0-20210323182238-8284ec40f8ce/go.mod h1:+KDVDTo3GjoDwp49GNzCQSfN4nwpL6Ulw6pYmG84zmM=
-github.com/Yoshi-Exeler/chesslib v0.0.0-20210323184308-09b5e7d4bcda h1:JRV7bl06itsQbUCiWUosq4dDtT/uANkk5lWGEAN+YxA=
-github.com/Yoshi-Exeler/chesslib v0.0.0-20210323184308-09b5e7d4bcda/go.mod h1:bE5EGs+iIw9KPi2CzcZFmnqh4nsAlkT9f0dO1tctLVg=
-github.com/ajstarks/svgo v0.0.0-20200320125537-f189e35d30ca h1:kWzLcty5V2rzOqJM7Tp/MfSX0RMSI1x4IOLApEefYxA=
+github.com/Yoshi-Exeler/chesslib v0.0.0-20210324173600-632e6b1ba6c2 h1:nlWxCoE12LhnihgJVHsyXzFG6ZJBuVqOQ6s30CIpxR0=
+github.com/Yoshi-Exeler/chesslib v0.0.0-20210324173600-632e6b1ba6c2 h1:nlWxCoE12LhnihgJVHsyXzFG6ZJBuVqOQ6s30CIpxR0=
+github.com/Yoshi-Exeler/chesslib v0.0.0-20210324173600-632e6b1ba6c2/go.mod h1:3QJZweiRCfmDI2rP9rZ72zBr5AQdxtghaPJ8XEYW7aU=
+github.com/Yoshi-Exeler/chesslib v0.0.0-20210324173600-632e6b1ba6c2/go.mod h1:3QJZweiRCfmDI2rP9rZ72zBr5AQdxtghaPJ8XEYW7aU=
 github.com/ajstarks/svgo v0.0.0-20200320125537-f189e35d30ca/go.mod h1:K08gAheRH3/J6wwsYMMT4xOr94bZjxIelGM0+d/wbFw=
 github.com/ajstarks/svgo v0.0.0-20200725142600-7a3c8b57fecb/go.mod h1:K08gAheRH3/J6wwsYMMT4xOr94bZjxIelGM0+d/wbFw=
-github.com/notnil/chess v1.5.0 h1:BcdmSGqZYhoqHsAqNpVTtPwRMOA4Sj8iZY1ZuPW4Umg=
 github.com/notnil/chess v1.5.0/go.mod h1:cRuJUIBFq9Xki05TWHJxHYkC+fFpq45IWwk94DdlCrA=

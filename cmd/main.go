@@ -47,7 +47,7 @@ func Turn() {
 			fmt.Print("White Played: ")
 		}
 		fmt.Println(game.Moves()[len(game.Moves())-1])
-		fmt.Println("Board Evaluation (Black Perspective):", math.Round((float64((game.Position().Board().EvaluateFast())))*100)/100)
+		fmt.Println("Board Evaluation (Black Perspective):", math.Round((float64((game.Position().Board().EvaluateFastI16())))*100)/100)
 		fmt.Println(engine.NewEngine(game, chess.Black).GetOpeningName())
 		if game.Position().Status() == chess.Checkmate {
 			if wmove {
@@ -64,20 +64,20 @@ func Turn() {
 		}
 	}
 	if wmove {
-		MakeRandomMove()
+		//MakeRandomMove()
 
 		//tree := engine.NewEngine(game, chess.White)
 		//mv := tree.SearchMinimax(4)
 		//game.Move(mv)
 
 		wmove = !wmove
-		/*w_begin_input:
+	w_begin_input:
 		inp := SpaceMap(ReadSTDIN())
 		err := game.MoveStr(inp)
 		if err != nil {
 			fmt.Printf("Your input was invalid, error: %v\n", err)
 			goto w_begin_input
-		}*/
+		}
 
 	} else {
 		start := time.Now()
