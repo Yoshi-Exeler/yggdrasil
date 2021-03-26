@@ -7,30 +7,27 @@ import (
 	"time"
 
 	chess "github.com/Yoshi-Exeler/chesslib"
-	"github.com/Yoshi-Exeler/chesslib/opening"
+	opening "github.com/Yoshi-Exeler/chesslib/opening"
 )
 
 /* Possible Optimizations
 *  Multithreading = ~5x Performance Increase
+*  SimulatePositions with different parents by only going back to the First Common Ancestor ~1.5x Performance Increase
 *  Improve Hash table Housekeeping
+*  LazySMP --> Search on many threads at the same time with a shared hashtable
 *  Endgame Eval and Sequence Database
-*  Use MVVLVA in move ordering (Most Valueable Victim Least Valuable Attacker)
-*  Save Moves that Cause Pruning, Search after Caputres (Killer Moves)
-*  Implement Futility Pruning
-*  Implement Delta Pruning
-*  Switch to a stronger Meta Search: MTD(f) or PVS(PrincipalVariationSearch) or BNS(BestNodeSearch)
-*  Implement Null Move Pruning
-* Paper on Chess Engines https://www.duo.uio.no/bitstream/handle/10852/53769/master.pdf?sequence=1&isAllowed=y
-* Paper on BNS https://www.bjmc.lu.lv/fileadmin/user_upload/lu_portal/projekti/bjmc/Contents/770_7.pdf
-* Paper on BNS https://arxiv.org/pdf/1806.00973.pdf
+*  Iterative Deepening in combination with the Hashtable and Pruning
+*  Caputre Heuristic Most Valueable Victim Least Valuable Attacker
+*  Save Moves that Cause Pruning, Search after Caputres
+* https://www.duo.uio.no/bitstream/handle/10852/53769/master.pdf?sequence=1&isAllowed=y
 *
  */
 
 // MaxScore is Bigger than the Maximum Score Reachable
-const MaxScore = int16(30000)
+const MaxScore = float32(3000)
 
 // MinScore is Smaller than the Minimum Score Reachable
-const MinScore = int16(-30000)
+const MinScore = float32(-3000)
 
 // Engine is the Minimax Engine
 type Engine struct {
@@ -44,7 +41,7 @@ type Engine struct {
 	Simulation         *chess.Position
 	Root               *Node
 	Color              chess.Color
-	EvaluationCache    map[[16]byte]int16
+	EvaluationCache    map[[16]byte]float32
 	GeneratedNodes     uint
 	QGeneratedNodes    uint
 	EvaluatedNodes     uint
@@ -64,14 +61,14 @@ type Node struct {
 	Value           *chess.Move
 	Leaves          []*Node
 	LeavesGenerated bool
-	StatusEval      int16
+	StatusEval      float32
 	StatusChecked   bool
 }
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(g *chess.Game, clr chess.Color) *Engine {
 	pos := *g.Position()
-	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]int16)}
+	return &Engine{UseOpeningTheory: true, Depth: 5, SearchMode: 1, ECO: opening.NewBookECO(), Game: g, Color: clr, Origin: *g.Position(), Simulation: &pos, Root: &Node{Value: nil, Depth: 0}, EvaluationCache: make(map[[16]byte]float32)}
 }
 
 // GetOpeningMove returns an opening theory move from ECO if one exists
@@ -167,7 +164,7 @@ func (e *Engine) Search() *chess.Move {
 	}
 	// Declare the best node and score
 	var bestNode *Node
-	var bestScore int16
+	var bestScore float32
 	// Switch the SearchMode
 	switch e.SearchMode {
 	case 1:
@@ -199,17 +196,17 @@ func u8Max(a uint8, b uint8) uint8 {
 }
 
 // SearchSynchronousFull will fully search the tree to the Specified Depth
-func (e *Engine) SearchSynchronousFull(depth int) (*Node, int16) {
+func (e *Engine) SearchSynchronousFull(depth int) (*Node, float32) {
 	return e.MinimaxPruning(e.Root, MinScore, MaxScore, depth, true)
 }
 
 // SearchSynchronousIterative
-func (e *Engine) SearchSynchronousIterative(processingTime time.Duration) (*Node, int16) {
+func (e *Engine) SearchSynchronousIterative(processingTime time.Duration) (*Node, float32) {
 	return nil, 0
 }
 
 // SearchAMP will search the position using Asymmetric Multi Processing
-func (e *Engine) SearchAMP(processingTime time.Duration) (*Node, int16) {
+func (e *Engine) SearchAMP(processingTime time.Duration) (*Node, float32) {
 	return nil, 0
 }
 
@@ -217,7 +214,7 @@ func (e *Engine) SearchAMP(processingTime time.Duration) (*Node, int16) {
 // by extending the Search until a Stable(Quiet) Position can be statically evaluated or the Entire Branch can
 // be failed by cutof (soft or hard fail). The Expected Branching factor in a Quiescence Search is around 7 in
 // the midgame so each search should not be too expensive.
-func (e *Engine) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool) int16 {
+func (e *Engine) QuiescenseSearch(node *Node, alpha float32, beta float32, max bool) float32 {
 	// Increment the Nodes Visited by QuiescenceSearch
 	e.QVisited++
 	// Check if the Current Node is a Terminating node
@@ -241,7 +238,9 @@ func (e *Engine) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 			alpha = standingPat
 		}
 		// Generate the Unstable Children of the Node, make sure not to influence the sim
+		tmp := *e.Simulation
 		unstable := node.GetUnstableLeaves(e, max)
+		e.Simulation = &tmp
 		// Iterate over the Unstable children of the node
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
@@ -278,7 +277,9 @@ func (e *Engine) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 			beta = standingPat
 		}
 		// Generate the Unstable Children of the Node
+		tmp := *e.Simulation
 		unstable := node.GetUnstableLeaves(e, max)
+		e.Simulation = &tmp
 		// Iterate over the Unstable children of the node
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
@@ -316,7 +317,7 @@ func (e *Engine) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 // as the Root node. The Tree will be Searched with the Minimax Algorithm. Alpha/Beta Pruning will be used
 // to significantly reduce the Required workload. Quiescence Search and an In-Check Search Extension will
 // be used to mitigate the Horizon effect to a reasonable degree.
-func (e *Engine) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, max bool) (*Node, int16) {
+func (e *Engine) MinimaxPruning(node *Node, alpha float32, beta float32, depth int, max bool) (*Node, float32) {
 	// Increment the Nodes visited by the Search
 	e.Visited++
 	// Check if the Current Node is a Terminating node i.e. Stalemate or Checkmate
@@ -340,17 +341,14 @@ func (e *Engine) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		// Iterate over the Children of the Current Node
 		for _, child := range leaves {
 			// Recursively Call Minimax for each child
-			snapshot := *e.Simulation
-			e.Simulation = e.Simulation.Update(child.Value)
 			nod, ev := e.MinimaxPruning(child, alpha, beta, depth-1, !max)
-			e.Simulation = &snapshot
 			// if the Current Child is better than the Previous best, it becomes the new Best
 			if ev > best {
 				best = ev
 				bestNode = nod
 			}
 			// Raise Alpha if the Current Child is Greater than Alpha
-			alpha = i16max(alpha, ev)
+			alpha = f32max(alpha, ev)
 			// Check if the Current Child Causes Pruning, in which case we can stop the Iteration immediately
 			if beta <= alpha {
 				break
@@ -368,17 +366,14 @@ func (e *Engine) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	// Iterate over the Children of the Current Node
 	for _, child := range leaves {
 		// Recursively Call Minimax for each child
-		snapshot := *e.Simulation
-		e.Simulation = e.Simulation.Update(child.Value)
 		nod, ev := e.MinimaxPruning(child, alpha, beta, depth-1, !max)
-		e.Simulation = &snapshot
 		// if the Current Child is worse than the Previous worst, it becomes the new worst
 		if ev < worst {
 			worst = ev
 			worstNode = nod
 		}
 		// Lower Beta if the Current Child is Lower than Alpha
-		beta = i16min(beta, ev)
+		beta = f32min(beta, ev)
 		// Check if the Current Child Causes Pruning, in which case we can stop the Iteration immediately
 		if beta <= alpha {
 			break
@@ -388,7 +383,7 @@ func (e *Engine) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 }
 
 // EvaluateStaticPosition will evaluate a Position statically, if an evaluation exists in the Hashtable, it is loaded instead
-func (e *Engine) EvaluateStaticPosition(pos *chess.Position) int16 {
+func (e *Engine) EvaluateStaticPosition(pos *chess.Position) float32 {
 	// Hash the Current Position
 	posHash := pos.Hash()
 	// Get the Value for this Hash
@@ -398,21 +393,20 @@ func (e *Engine) EvaluateStaticPosition(pos *chess.Position) int16 {
 		e.LoadedFromPosCache++
 		return storedV
 	}
-	score := int16(0)
+	score := float32(0)
 	// Perform Static Evaluation
-	score = e.Eval()
+	score = EvaluatePosition(e.Simulation, e.Color)
+	// Increment the Evaluations Performed in Quiescence Search
+	e.QEvaluatedNodes++
 	// Save this Evaluation to the Cache
 	e.EvaluationCache[posHash] = score
 	return score
 }
 
-func (e *Engine) Eval() int16 {
-	e.EvaluatedNodes++
-	return e.Simulation.Board().EvaluateFastI16()
-}
-
 // EvaluateWithQuiescence will return the Evaluation of the Node, using QuiescenseSearch if applicable
-func (n *Node) EvaluateWithQuiescence(e *Engine, alpha int16, beta int16, depth int, max bool) int16 {
+func (n *Node) EvaluateWithQuiescence(e *Engine, alpha float32, beta float32, depth int, max bool) float32 {
+	// Simulate the State of this Node
+	e.simulateToNode(n)
 	// Hash the Current Position
 	posHash := e.Simulation.Hash()
 	// Get the Value for this Hash
@@ -422,16 +416,19 @@ func (n *Node) EvaluateWithQuiescence(e *Engine, alpha int16, beta int16, depth 
 		e.LoadedFromPosCache++
 		return storedV
 	}
-	score := int16(0)
+	score := float32(0)
 	// Check wether or not this node is stable
+	tmp := *e.Simulation
 	unstableLeaves := n.GetUnstableLeaves(e, max)
+	e.Simulation = &tmp
 	// if it is unstable begin Quiescence
 	if len(unstableLeaves) > 0 {
 		e.FrontierUnstable++
 		score = e.QuiescenseSearch(n, alpha, beta, max)
 		// if the node is stable perform Static Evaluation
 	} else {
-		score = e.Eval()
+		e.EvaluatedNodes++
+		score = EvaluatePosition(e.Simulation, e.Color)
 	}
 	// Save this Evaluation to the Cache
 	e.EvaluationCache[posHash] = score
@@ -439,7 +436,7 @@ func (n *Node) EvaluateWithQuiescence(e *Engine, alpha int16, beta int16, depth 
 }
 
 // NodeStatusScore Returns the Status evaluation of this node
-func (e *Engine) NodeStatusScore(n *Node, inv bool) int16 {
+func (e *Engine) NodeStatusScore(n *Node, inv bool) float32 {
 	// if this is the root dont check
 	if n.Value == nil {
 		return MinScore
@@ -448,6 +445,8 @@ func (e *Engine) NodeStatusScore(n *Node, inv bool) int16 {
 	if n.StatusChecked {
 		return n.StatusEval
 	}
+	// Simulate to the Node
+	e.simulateToNode(n)
 	// Evaluate the Status of the node using the specified inversion
 	n.StatusEval = statusEval(e.Simulation.Status(), inv)
 	// Set a flag that the status was evaluated so we dont evaluate again
@@ -462,12 +461,12 @@ func statusIsEnd(s chess.Method) bool {
 
 // statusEval will return the status score of the node, MinScore if this is a regular node
 // 1000 or -1000 for Checkmate, 0 for Stalemate
-func statusEval(s chess.Method, inv bool) int16 {
+func statusEval(s chess.Method, inv bool) float32 {
 	if s == chess.Checkmate {
 		if inv {
-			return -10000
+			return -1000.0
 		}
-		return 10000
+		return 1000.0
 	}
 	if s == chess.Stalemate {
 		return 0
@@ -522,6 +521,8 @@ func (n *Node) GetUnstableLeaves(e *Engine, inv bool) []*Node {
 
 // GenerateLeaves will generate the leaves of the specified node
 func (n *Node) GenerateLeaves(e *Engine) []*Node {
+	// Get the Sequence of the Parent node we were called on
+	e.simulateToNode(n)
 	// Get the Valid Moves From this Position
 	vmoves := e.Simulation.ValidMoves()
 	// Initialize node collection
@@ -534,6 +535,27 @@ func (n *Node) GenerateLeaves(e *Engine) []*Node {
 	// Set the Leaves of MV
 	n.Leaves = nds
 	return nds
+}
+
+func (e *Engine) simulateToNode(n *Node) {
+	// Reset the Simulation to the Origin
+	e.resetSimulation()
+	// If this is the Root node we stop now, nothing todo
+	if n.Value == nil {
+		return
+	}
+	// Get the Sequence Required to get to this node
+	seq := n.getSequence(e)
+	// Apply those move to get to the Current Node
+	for _, ms := range seq {
+		e.Simulation = e.Simulation.Update((ms))
+	}
+}
+
+// resetSimulation will reset the Simulated game to the original state
+func (e *Engine) resetSimulation() {
+	npos := e.Origin
+	e.Simulation = &npos
 }
 
 // getSequence will return the full sequence of moves required to get to this node including the move of this node
@@ -554,14 +576,34 @@ func (n *Node) getSequence(e *Engine) []*chess.Move {
 	return rev
 }
 
-func i16min(a int16, b int16) int16 {
+// EvalStatic will evaluate a board
+func EvaluatePosition(pos *chess.Position, clr chess.Color) float32 {
+	// Calculate the Status of this Position
+	status := pos.Status()
+	// Calculate the Score of this Position
+	score := pos.Board().Evaluate(clr)
+	// Check for Checkmate
+	if status == chess.Checkmate {
+		if pos.Turn() == clr {
+			return -1000.0
+		}
+		return 1000.0
+	}
+	// Check for Stalemate
+	if status == chess.Stalemate {
+		return 0
+	}
+	return score
+}
+
+func f32min(a float32, b float32) float32 {
 	if a < b {
 		return a
 	}
 	return b
 }
 
-func i16max(a int16, b int16) int16 {
+func f32max(a float32, b float32) float32 {
 	if a > b {
 		return a
 	}

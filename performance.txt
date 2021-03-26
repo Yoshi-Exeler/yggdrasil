@@ -1,6 +1,6 @@
 Baseline Performance:
 Engine Plays Black
-Begin Game
+BEGIN GAME
 White Plays e4
 Engine Searches with Depth 5
 Generated 10.190.777 Nodes in 4.348 Seconds @ 2.547.694 nps
@@ -13,8 +13,7 @@ Optimal Path According to the Engine is [e7e6 d1h5 d8g5 c2c4 g8f6]
 The Engine Plays e7e6
 
 
-Optimized Minimax: (0)
-// Fixed Bugs, Perf Neutral even though more checks are present
+Optimized Minimax: (Fixed Bugs, Perf Neutral even though more checks are present)
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -28,7 +27,6 @@ Evaluated 9.771.632 Nodes in 65.098ms for 150.332NPS
 The Engine Plays b8c6
 
 Minimax_Generate_OTF: (+6Kn/s Eval)
-// Generate Layers dynamically
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -40,7 +38,6 @@ Searched 10.190.777 Nodes in 69,778 Seconds @ 146.045 nps
 The Engine Plays d7d5
 
 Minimax_Alpha_Beta_Prune: (+1.531Mn/s Effective Search Speed)
-// Implement Alpha/Beta Pruning
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -52,7 +49,6 @@ Searched 10.190.777 Nodes in 6,075 Seconds @ 1.677.494 nps
 
 
 Minimax_Alpha_Beta_Prune_Generate_Dynamic: (+3.221Mn/s Effective Search Speed)
-// Dynamically Generate the Searchtree as needed
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -63,7 +59,6 @@ Search Completed in 2080ms
 Searched 10.190.777 Nodes in 2,080 Seconds @ 4.899.412 nps
 
 Minimax_ABD_Optimize_Eval: (+832Kn/s Effective Search Speed)
-// General Optimization
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -74,7 +69,6 @@ Search Completed in 1778ms
 Searched 10.190.777 Nodes in 1,778 Seconds @ 5.731.595 nps
 
 Minimax_ABD_Optimize_Eval: (+832Kn/s Effective Search Speed)
-// General Optimization
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -85,7 +79,6 @@ Search Completed in 1778ms
 Searched 10.190.777 Nodes in 1,778 Seconds @ 5.731.595 nps
 
 Minimax_ABD_Transposition: (+605Kn/s Effective Search Speed)
-// Implement Transposition Table
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -102,7 +95,6 @@ Evaluate() - 2,124 microseconds
 
 
 Minimax_ABD_HSort: (+366eKn/s)
-// Implement Heuristic Sorting
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -114,8 +106,7 @@ Generation Space Reduction: 85.4% Evaluation Space Reduction 98.4%
 Searched 10.190.777 Nodes in 1520 Seconds @ 6.704.458 enps
 
 
-Minimax_ABD_Quiesc: (This version had a bug causing it to not prune in min branches)
-// implement Quiescence search
+Minimax_ABD_Quiesc: ()
 Engine Plays Black
 Begin Game
 White Plays e4
@@ -125,59 +116,3 @@ Generated: 2.311.355 Visited: 381.294 Evaluated: 37.303 LoadedFromCache: 119.881
 Generation Space Reduction: 77,31% Static Evaluation Space Reduction 99,63%
 QGenerated: 8.288.570 QVisited: 307.435 QEvaluated: 276.841 FrontierUnstable: 141.147
 Search Completed in 8804ms
-
-Minimax_ABD_Quiesc_Fix: (Established new Bounds for working Quiesc)
-// Fix min branches not using pruning
-Engine Plays Black
-Begin Game
-White Plays e4
-Engine Searches with Depth 5
-Optimal Path According to the Engine: [h7h5 d1f3 e7e6 f1b5 d8h4]
-Generated: 618.514 Visited: 193.038 Evaluated: 21.480 LoadedFromCache: 79.019
-Generation Space Reduction: 93,93% Static Evaluation Space Reduction 99,78%
-QGenerated: 411.453 QVisited: 228.128 QEvaluated: 197.837 FrontierUnstable: 89.420
-Raw Evaluation Speed: 39.247 NPS
-Effective Search Speed: 1.823.689 NPS
-Search Completed in 5588ms
-
-Minimax_ABD_Quiesc_NoSTN: (Raw: +11.828 NPS, Effective: +549.570 NPS)
-// Removed SimulateToNode and replaced it with Contextual Simulation updates
-Engine Plays Black
-Begin Game
-White Plays e4
-Engine Searches with Depth 5
-Optimal Path According to the Engine: [h7h5 d1f3 e7e6 f1b5 d8h4]
-Generated: 618.514 Visited: 193.038 Evaluated: 21.480 LoadedFromCache: 79.019
-Generation Space Reduction: 93,93% Static Evaluation Space Reduction 99,78%
-QGenerated: 411.453 QVisited: 228.128 QEvaluated: 197.837 FrontierUnstable: 89.420
-Raw Evaluation Speed: 51.075 NPS
-Effective Search Speed: 2.373.259 NPS
-Search Completed in 4294ms
-
-Minimax_ABD_Quiesc_Optimize: (Raw: +1.218 NPS, Effective: +56.587 NPS)
-// Several Smaller Optimizations
-Engine Plays Black
-Begin Game
-White Plays e4
-Engine Searches with Depth 5
-Optimal Path According to the Engine: [h7h5 d1f3 e7e6 f1b5 d8h4]
-Generated: 618.514 Visited: 193.038 Evaluated: 21.480 LoadedFromCache: 79.019
-Generation Space Reduction: 93,93% Static Evaluation Space Reduction 99,78%
-QGenerated: 411.453 QVisited: 228.128 QEvaluated: 197.837 FrontierUnstable: 89.420
-Raw Evaluation Speed: 52.293 NPS
-Effective Search Speed: 2.429.846 NPS
-Search Completed in 4194ms
-
-Minimax_ABD_Quiesc_Int16: (Raw: -3.064 NPS, Effective: +1.162.250 NPS, Generation Space Reducion: +2,24%)
-// Switch Score datatype to int16
-Engine Plays Black
-Begin Game
-White Plays e4
-Engine Searches with Depth 5
-Optimal Path According to the Engine:[b8c6 f1c4 g8f6 d1f3 c6d4]
-Generated:390104 Visited:118362 Evaluated:139665 LoadedFromCache:51843
-Generation Space Reduction: 96,17%
-QGenerated:272667 QVisited:150479 QEvaluated:0 FrontierUnstable:55286
-Raw Evaluation Speed: 49.229 NPS
-Effective Search Speed: 3.592.096 NPS
-Search Completed in 2837ms
