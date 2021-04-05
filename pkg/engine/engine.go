@@ -67,16 +67,14 @@ type Worker struct {
 
 // Node is a node in the Engine
 type Node struct {
-	Parent          *Node
-	Depth           uint8
-	QDepth          uint8
-	BestChild       *Node
-	BestChildEval   int16
-	Value           *chess.Move
-	Leaves          []*Node
-	LeavesGenerated bool
-	StatusEval      int16
-	StatusChecked   bool
+	Parent        *Node
+	Depth         uint8
+	QDepth        uint8
+	BestChild     *Node
+	BestChildEval int16
+	Value         *chess.Move
+	StatusEval    int16
+	StatusChecked bool
 }
 
 // NewEngine returns a new Engine from the specified game
@@ -190,9 +188,9 @@ func (e *Engine) Search() *chess.Move {
 		bestNode, bestScore = e.SearchSynchronousIterative(e.Game, e.ProcessingTime)
 	}
 	// Get the Origin Move of the Best Leaf, i.e. the move to play
-	origin := bestNode.getSequenceE(e)[0]
+	origin := bestNode.getSequence(e)[0]
 	// Log some information about the search we just completed
-	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v LD:%v\n", bestNode.getSequenceE(e), math.Round(float64(bestScore)*100)/100, origin, bestNode.Depth, bestNode.QDepth, u8Max(bestNode.Depth, bestNode.QDepth))
+	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v LD:%v\n", bestNode.getSequence(e), math.Round(float64(bestScore)*100)/100, origin, bestNode.Depth, bestNode.QDepth, u8Max(bestNode.Depth, bestNode.QDepth))
 	fmt.Printf("[YGG] Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
 	fmt.Printf("[YGG] QGenerated:%v QVisited:%v QEvaluated:%v FrontierUnstable:%v\n", e.QGeneratedNodes, e.QVisited, e.QEvaluatedNodes, e.FrontierUnstable)
 	return origin
@@ -379,7 +377,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		best := MinScore
 		bestNode := &Node{}
 		// Generate the Children of the current node
-		leaves := node.GetLeaves(w)
+		leaves := node.GenerateLeaves(w)
 		// Sort them by their Expected impact on the Evaluation (Captures and Checks first)
 		sort.Sort(byMoveVariance(leaves))
 		// Iterate over the Children of the Current Node
@@ -412,7 +410,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	worst := MaxScore
 	worstNode := &Node{}
 	// Generate the Children of the current node
-	leaves := node.GetLeaves(w)
+	leaves := node.GenerateLeaves(w)
 	// Sort them by their Expected impact on the Evaluation (Captures and Checks first)
 	sort.Sort(byMoveVariance(leaves))
 	// Iterate over the Children of the Current Node
@@ -465,15 +463,6 @@ func (w *Worker) EvaluateStaticPosition(pos *chess.Position) int16 {
 
 // EvaluateWithQuiescence will return the Evaluation of the Node, using QuiescenseSearch if applicable
 func (n *Node) EvaluateWithQuiescence(w *Worker, alpha int16, beta int16, depth int, max bool) int16 {
-	// Hash the Current Position
-	posHash := w.Simulation.Hash()
-	// Get the Value for this Hash
-	storedV, err := w.ReadFromCache(posHash)
-	// If we have a stored value for this Hash return it
-	if err == nil {
-		w.Engine.LoadedFromPosCache++
-		return storedV
-	}
 	score := int16(0)
 	// Check wether or not this node is stable
 	unstableLeaves := n.GetUnstableLeaves(w, max)
@@ -484,10 +473,19 @@ func (n *Node) EvaluateWithQuiescence(w *Worker, alpha int16, beta int16, depth 
 		// if the node is stable perform Static Evaluation
 	} else {
 		w.Engine.EvaluatedNodes++
+		// Hash the Current Position
+		posHash := w.Simulation.Hash()
+		// Get the Value for this Hash
+		storedV, err := w.ReadFromCache(posHash)
+		// If we have a stored value for this Hash return it
+		if err == nil {
+			w.Engine.LoadedFromPosCache++
+			return storedV
+		}
 		score = EvaluatePosition(w.Simulation, w.Engine.Color)
+		// Save this Evaluation to the Cache
+		w.CommitToCache(posHash, score)
 	}
-	// Save this Evaluation to the Cache
-	w.CommitToCache(posHash, score)
 	return score
 }
 
@@ -536,14 +534,6 @@ func reverseSequence(seq []*chess.Move) []*chess.Move {
 	return seq
 }
 
-// GetLeaves will return the Leaves of the node and generate them if they dont exist yet
-func (n *Node) GetLeaves(w *Worker) []*Node {
-	if n.LeavesGenerated {
-		return n.Leaves
-	}
-	return n.GenerateLeaves(w)
-}
-
 // IsCheck returns if a node is a checking node
 func (n *Node) IsCheck() bool {
 	if n == nil || n.Value == nil {
@@ -554,14 +544,12 @@ func (n *Node) IsCheck() bool {
 
 // GetUnstableLeaves Returns the list of Immediate Recaptures that became availabe through the last move
 func (n *Node) GetUnstableLeaves(w *Worker, inv bool) []*Node {
-	// Snapshot the Simulation state
-	snapshot := *w.Simulation
 	// Return an empty list if the Node is a terminating node, this could be optimized by only calling this from a safe ctx
 	nseval := w.NodeStatusScore(n, inv)
 	if nseval > MinScore {
 		return make([]*Node, 0)
 	}
-	leaves := n.GetLeaves(w)
+	leaves := n.GenerateLeaves(w)
 	w.Engine.GeneratedNodes -= uint(len(leaves))
 	unstable := []*Node{}
 	for _, nd := range leaves {
@@ -570,10 +558,6 @@ func (n *Node) GetUnstableLeaves(w *Worker, inv bool) []*Node {
 			unstable = append(unstable, nd)
 		}
 	}
-	n.Leaves = unstable
-	n.LeavesGenerated = true
-	// Restore the Original Simulation state
-	w.Simulation = &snapshot
 	return unstable
 }
 
@@ -588,13 +572,11 @@ func (n *Node) GenerateLeaves(w *Worker) []*Node {
 		w.Engine.GeneratedNodes++
 		nds = append(nds, &Node{Parent: n, Value: mov, Depth: n.Depth + 1})
 	}
-	// Set the Leaves of MV
-	n.Leaves = nds
 	return nds
 }
 
 // getSequence will return the full sequence of moves required to get to this node including the move of this node
-func (n *Node) getSequenceE(e *Engine) []*chess.Move {
+func (n *Node) getSequence(e *Engine) []*chess.Move {
 	seq := make([]*chess.Move, 0)
 	cnode := n
 	for {
