@@ -26,7 +26,7 @@ func main() {
 	reader = bufio.NewReader(os.Stdin)
 	// Create the Game
 	fenStr := "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-	//fenStr := "rnbqkbnr/pppp1ppp/8/4p3/5P2/4P3/PPPP2PP/RNBQKBNR b KQkq - 0 2"
+	//fenStr := "3k4/1pp2pr1/3P3p/7b/p7/P3q3/5R2/5K2 b - - 7 40"
 	fen, _ := chess.FEN(fenStr)
 	game = chess.NewGame(fen)
 	// Enter Game Loop

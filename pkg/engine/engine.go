@@ -81,7 +81,7 @@ type Node struct {
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
-	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
+	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
 }
 
 // GetOpeningMove returns an opening theory move from ECO if one exists
@@ -188,9 +188,6 @@ func (e *Engine) Search() *chess.Move {
 		// SynchronousIterative will search Synchronously using Iterative Deepening until the
 		// specified processing time has elapsed
 		bestNode, bestScore = e.SearchSynchronousIterative(e.Game, e.ProcessingTime)
-	case 3:
-		// AMP will search using Asynchronous Iterative Deepening
-		bestNode, bestScore = e.SearchAMP(e.Game, e.ProcessingTime)
 	}
 	// Get the Origin Move of the Best Leaf, i.e. the move to play
 	origin := bestNode.getSequenceE(e)[0]
@@ -253,42 +250,6 @@ func (w *Worker) CommitToCache(hash [16]byte, eval float32) {
 	w.Engine.SharedCache.Store(hash, eval)
 }
 
-// SearchAMP will search the position using Asymmetric Multi Processing
-func (e *Engine) SearchAMP(game *chess.Game, processingTime time.Duration) (*Node, float32) {
-	// Pre Generate the Children of the root
-	rootChildren := game.ValidMoves()
-	// Create Nodes for each move
-	firstLayer := make([]*Node, 0)
-	// Create a Worker for each move
-	workers := make([]*Worker, 0)
-	// Iterate over the RootNodes
-	for i := 0; i < len(rootChildren); i++ {
-		localRoot := &Node{Parent: nil, Depth: 0, QDepth: 0, Value: rootChildren[i]}
-		workers = append(workers, &Worker{Engine: e, Simulation: game.Position().Update(localRoot.Value), Origin: *game.Position().Update(localRoot.Value), Root: localRoot})
-		firstLayer = append(firstLayer, localRoot)
-	}
-	// Start the Workers
-	for i := 0; i < len(workers); i++ {
-		go workers[i].Search(workers[i].Root, MinScore, MaxScore, e.Depth, true)
-	}
-	// Wait for the Processing Time
-	time.Sleep(processingTime)
-	// Stop the Workers
-	for i := 0; i < len(workers); i++ {
-		workers[i].Stop = true
-	}
-	// Take max of the results
-	bestNode := &Node{}
-	bestScore := MinScore
-	for i := 0; i < len(firstLayer); i++ {
-		if firstLayer[i].BestChildEval > bestScore {
-			bestNode = firstLayer[i]
-			bestScore = firstLayer[i].BestChildEval
-		}
-	}
-	return bestNode, bestScore
-}
-
 func (w *Worker) Search(node *Node, alpha float32, beta float32, depth int, max bool) {
 	currentDepth := depth
 	for {
@@ -301,6 +262,11 @@ func (w *Worker) Search(node *Node, alpha float32, beta float32, depth int, max 
 		w.Root.BestChildEval = eval
 		currentDepth++
 	}
+}
+
+// CalculateOrLoadQuiescence either calculates or loads the Quiescence Score for the Specified node
+func CalculateOrLoadQuiescence(node *Node, alpha float32, beta float32, depth int, max bool) {
+	//
 }
 
 // QuiescenseSearch will Search the Specified Position with a limited SubSearch to mitigate the Horizon effect
@@ -340,6 +306,8 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha float32, beta float32, max b
 			snapshot := *w.Simulation
 			// Simulate the Move of the current child
 			w.Simulation = w.Simulation.Update(alloc.Value)
+			// Set the Depth of the Child Node
+			alloc.Depth = node.Depth + 1
 			// Call QuiescenseSearch recursively
 			score := w.QuiescenseSearch(&alloc, alpha, beta, !max)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
@@ -377,7 +345,9 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha float32, beta float32, max b
 			snapshot := *w.Simulation
 			// Simulate the Move of the current child
 			w.Simulation = w.Simulation.Update(alloc.Value)
-			// Call Q recursively
+			// Set the Depth of the Child Node
+			alloc.Depth = node.Depth + 1
+			// Call QuiescenseSearch recursively
 			score := w.QuiescenseSearch(&alloc, alpha, beta, !max)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
 			w.Simulation = &snapshot
@@ -409,7 +379,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha float32, beta float32, max b
 func (w *Worker) MinimaxPruning(node *Node, alpha float32, beta float32, depth int, max bool) (*Node, float32) {
 	// Immediately Exit if our worker was stopped, returns will be ignored
 	if w.Stop {
-		return node, -1337
+		return node, 0
 	}
 	// Increment the Nodes visited by the Search
 	w.Engine.Visited++
@@ -434,7 +404,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 		// Iterate over the Children of the Current Node
 		for _, child := range leaves {
 			// Recursively Call Minimax for each child
-			nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, !max)
+			nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, false)
 			// if the Current Child is better than the Previous best, it becomes the new Best
 			if ev > best {
 				best = ev
@@ -459,7 +429,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 	// Iterate over the Children of the Current Node
 	for _, child := range leaves {
 		// Recursively Call Minimax for each child
-		nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, !max)
+		nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, true)
 		// if the Current Child is worse than the Previous worst, it becomes the new worst
 		if ev < worst {
 			worst = ev
@@ -539,7 +509,7 @@ func (w *Worker) NodeStatusScore(n *Node, inv bool) float32 {
 	// Simulate to the Node
 	w.simulateToNode(n)
 	// Evaluate the Status of the node using the specified inversion
-	n.StatusEval = statusEval(w.Simulation.Status(), inv)
+	n.StatusEval = statusEval(w.Simulation.Status(), inv, int(n.Depth))
 	// Set a flag that the status was evaluated so we dont evaluate again
 	n.StatusChecked = true
 	return n.StatusEval
@@ -552,12 +522,12 @@ func statusIsEnd(s chess.Method) bool {
 
 // statusEval will return the status score of the node, MinScore if this is a regular node
 // 1000 or -1000 for Checkmate, 0 for Stalemate
-func statusEval(s chess.Method, inv bool) float32 {
+func statusEval(s chess.Method, inv bool, depth int) float32 {
 	if s == chess.Checkmate {
 		if inv {
-			return -1000.0
+			return -1000.0 + (-100 + float32(depth))
 		}
-		return 1000.0
+		return 1000.0 + (100 - float32(depth))
 	}
 	if s == chess.Stalemate {
 		return 0
