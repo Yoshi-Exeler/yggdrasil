@@ -276,7 +276,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 			alpha = standingPat
 		}
 		// Generate the Unstable Children of the Node, make sure not to influence the sim
-		unstable := node.GetUnstableLeaves(w, max)
+		unstable := node.GetUnstableLeaves(w, max, node.IsCheck())
 		// Iterate over the Unstable children of the node
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
@@ -315,7 +315,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 			beta = standingPat
 		}
 		// Generate the Unstable Children of the Node
-		unstable := node.GetUnstableLeaves(w, max)
+		unstable := node.GetUnstableLeaves(w, max, node.IsCheck())
 		// Iterate over the Unstable children of the node
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
@@ -465,7 +465,7 @@ func (w *Worker) EvaluateStaticPosition(pos *chess.Position) int16 {
 func (n *Node) EvaluateWithQuiescence(w *Worker, alpha int16, beta int16, depth int, max bool) int16 {
 	score := int16(0)
 	// Check wether or not this node is stable
-	unstableLeaves := n.GetUnstableLeaves(w, max)
+	unstableLeaves := n.GetUnstableLeaves(w, max, false)
 	// if it is unstable begin Quiescence
 	if len(unstableLeaves) > 0 {
 		w.Engine.FrontierUnstable++
@@ -543,7 +543,7 @@ func (n *Node) IsCheck() bool {
 }
 
 // GetUnstableLeaves Returns the list of Immediate Recaptures that became availabe through the last move
-func (n *Node) GetUnstableLeaves(w *Worker, inv bool) []*Node {
+func (n *Node) GetUnstableLeaves(w *Worker, inv bool, check bool) []*Node {
 	// Return an empty list if the Node is a terminating node, this could be optimized by only calling this from a safe ctx
 	nseval := w.NodeStatusScore(n, inv)
 	if nseval > MinScore {
@@ -553,7 +553,7 @@ func (n *Node) GetUnstableLeaves(w *Worker, inv bool) []*Node {
 	w.Engine.GeneratedNodes -= uint(len(leaves))
 	unstable := []*Node{}
 	for _, nd := range leaves {
-		if nd.Value.HasTag(chess.Capture) || nd.Value.HasTag(chess.Check) {
+		if check || (nd.Value.HasTag(chess.Capture) || nd.Value.HasTag(chess.Check)) {
 			w.Engine.QGeneratedNodes++
 			unstable = append(unstable, nd)
 		}
