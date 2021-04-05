@@ -13,16 +13,22 @@ import (
 
 /* Possible Optimizations
 *  Multithreading = ~5x Performance Increase
-*  SimulatePositions with different parents by only going back to the First Common Ancestor ~1.5x Performance Increase
 *  Improve Hash table Housekeeping
 *  LazySMP --> Search on many threads at the same time with a shared hashtable
 *  Endgame Eval and Sequence Database
-*  Iterative Deepening in combination with the Hashtable and Pruning
-*  Caputre Heuristic Most Valueable Victim Least Valuable Attacker
+*  Improve Move ordering using MVVLVA
 *  Save Moves that Cause Pruning, Order after Caputres
 *  https://www.duo.uio.no/bitstream/handle/10852/53769/master.pdf?sequence=1&isAllowed=y
-*  More efficient nondeterministic Lazy SMP by adding 0.000001 - 0.000009 Randomly to each eval
-*
+*  Remove all References from the Tree, only save the parents of the best node and the node currently being evaluated
+*  Implement Delta Pruning in Quiescence Search
+*  Implement Futility Pruning at the Frontier (depth==1)
+*  Scope out the Viability of SEE (Static Exchange Evaluation) in this framework
+*  Implement an AlphaBeta improvement (MTD(f),PVS,BNS)
+*  Benchmark NegaMax vs Minimax
+*  Reduce the Code as far as possible
+*  Refractor API's
+*  Expand testing Framework
+*  Expand Benchmarks
  */
 
 /* Known Problems & Bugs
