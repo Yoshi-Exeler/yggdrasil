@@ -19,7 +19,7 @@ import (
 *  Endgame Eval and Sequence Database
 *  Iterative Deepening in combination with the Hashtable and Pruning
 *  Caputre Heuristic Most Valueable Victim Least Valuable Attacker
-*  Save Moves that Cause Pruning, Search after Caputres
+*  Save Moves that Cause Pruning, Order after Caputres
 *  https://www.duo.uio.no/bitstream/handle/10852/53769/master.pdf?sequence=1&isAllowed=y
 *  More efficient nondeterministic Lazy SMP by adding 0.000001 - 0.000009 Randomly to each eval
 *
@@ -30,10 +30,10 @@ import (
  */
 
 // MaxScore is Bigger than the Maximum Score Reachable
-const MaxScore = float32(3000)
+const MaxScore = int16(3000)
 
 // MinScore is Smaller than the Minimum Score Reachable
-const MinScore = float32(-3000)
+const MinScore = int16(-3000)
 
 // Engine is the Minimax Engine
 type Engine struct {
@@ -71,17 +71,17 @@ type Node struct {
 	Depth           uint8
 	QDepth          uint8
 	BestChild       *Node
-	BestChildEval   float32
+	BestChildEval   int16
 	Value           *chess.Move
 	Leaves          []*Node
 	LeavesGenerated bool
-	StatusEval      float32
+	StatusEval      int16
 	StatusChecked   bool
 }
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
-	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
+	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
 }
 
 // GetOpeningMove returns an opening theory move from ECO if one exists
@@ -177,7 +177,7 @@ func (e *Engine) Search() *chess.Move {
 	}
 	// Declare the best node and score
 	var bestNode *Node
-	var bestScore float32
+	var bestScore int16
 	// Switch the SearchMode
 	switch e.SearchMode {
 	case 1:
@@ -206,13 +206,13 @@ func u8Max(a uint8, b uint8) uint8 {
 }
 
 // SearchSynchronousFull will fully search the tree to the Specified Depth
-func (e *Engine) SearchSynchronousFull(game *chess.Game, depth int) (*Node, float32) {
+func (e *Engine) SearchSynchronousFull(game *chess.Game, depth int) (*Node, int16) {
 	w := &Worker{Engine: e, Simulation: game.Position(), Origin: *game.Position(), Depth: depth, Root: &Node{Depth: 0, QDepth: 0, StatusEval: MinScore, StatusChecked: true}}
 	return w.MinimaxPruning(w.Root, MinScore, MaxScore, depth, true)
 }
 
 // SearchSynchronousIterative
-func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime time.Duration) (*Node, float32) {
+func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime time.Duration) (*Node, int16) {
 	currentDepth := 1
 	bestNode := &Node{}
 	bestScore := MinScore
@@ -234,23 +234,23 @@ func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime tim
 	return bestNode, bestScore
 }
 
-func (w *Worker) ReadFromCache(hash [16]byte) (float32, error) {
+func (w *Worker) ReadFromCache(hash [16]byte) (int16, error) {
 	val, ok := w.Engine.SharedCache.Load(hash)
 	if !ok {
 		return 0, fmt.Errorf("cache acess failed")
 	}
-	ret, ok := val.(float32)
+	ret, ok := val.(int16)
 	if !ok {
 		return 0, fmt.Errorf("type assertion failed")
 	}
 	return ret, nil
 }
 
-func (w *Worker) CommitToCache(hash [16]byte, eval float32) {
+func (w *Worker) CommitToCache(hash [16]byte, eval int16) {
 	w.Engine.SharedCache.Store(hash, eval)
 }
 
-func (w *Worker) Search(node *Node, alpha float32, beta float32, depth int, max bool) {
+func (w *Worker) Search(node *Node, alpha int16, beta int16, depth int, max bool) {
 	currentDepth := depth
 	for {
 		nd, eval := w.MinimaxPruning(node, alpha, beta, currentDepth, max)
@@ -265,7 +265,7 @@ func (w *Worker) Search(node *Node, alpha float32, beta float32, depth int, max 
 }
 
 // CalculateOrLoadQuiescence either calculates or loads the Quiescence Score for the Specified node
-func CalculateOrLoadQuiescence(node *Node, alpha float32, beta float32, depth int, max bool) {
+func CalculateOrLoadQuiescence(node *Node, alpha int16, beta int16, depth int, max bool) {
 	//
 }
 
@@ -273,7 +273,7 @@ func CalculateOrLoadQuiescence(node *Node, alpha float32, beta float32, depth in
 // by extending the Search until a Stable(Quiet) Position can be statically evaluated or the Entire Branch can
 // be failed by cutof (soft or hard fail). The Expected Branching factor in a Quiescence Search is around 7 in
 // the midgame so each search should not be too expensive.
-func (w *Worker) QuiescenseSearch(node *Node, alpha float32, beta float32, max bool) float32 {
+func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool) int16 {
 	// Increment the Nodes Visited by QuiescenceSearch
 	w.Engine.QVisited++
 	// Check if the Current Node is a Terminating node
@@ -376,7 +376,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha float32, beta float32, max b
 // as the Root node. The Tree will be Searched with the Minimax Algorithm. Alpha/Beta Pruning will be used
 // to significantly reduce the Required workload. Quiescence Search and an In-Check Search Extension will
 // be used to mitigate the Horizon effect to a reasonable degree.
-func (w *Worker) MinimaxPruning(node *Node, alpha float32, beta float32, depth int, max bool) (*Node, float32) {
+func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, max bool) (*Node, int16) {
 	// Immediately Exit if our worker was stopped, returns will be ignored
 	if w.Stop {
 		return node, 0
@@ -446,7 +446,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha float32, beta float32, depth i
 }
 
 // EvaluateStaticPosition will evaluate a Position statically, if an evaluation exists in the Hashtable, it is loaded instead
-func (w *Worker) EvaluateStaticPosition(pos *chess.Position) float32 {
+func (w *Worker) EvaluateStaticPosition(pos *chess.Position) int16 {
 	// Hash the Current Position
 	posHash := pos.Hash()
 	// Get the Value for this Hash
@@ -456,7 +456,7 @@ func (w *Worker) EvaluateStaticPosition(pos *chess.Position) float32 {
 		w.Engine.LoadedFromPosCache++
 		return storedV
 	}
-	score := float32(0)
+	score := int16(0)
 	// Perform Static Evaluation
 	score = EvaluatePosition(w.Simulation, w.Engine.Color)
 	// Increment the Evaluations Performed in Quiescence Search
@@ -467,7 +467,7 @@ func (w *Worker) EvaluateStaticPosition(pos *chess.Position) float32 {
 }
 
 // EvaluateWithQuiescence will return the Evaluation of the Node, using QuiescenseSearch if applicable
-func (n *Node) EvaluateWithQuiescence(w *Worker, alpha float32, beta float32, depth int, max bool) float32 {
+func (n *Node) EvaluateWithQuiescence(w *Worker, alpha int16, beta int16, depth int, max bool) int16 {
 	// Simulate the State of this Node
 	w.simulateToNode(n)
 	// Hash the Current Position
@@ -479,7 +479,7 @@ func (n *Node) EvaluateWithQuiescence(w *Worker, alpha float32, beta float32, de
 		w.Engine.LoadedFromPosCache++
 		return storedV
 	}
-	score := float32(0)
+	score := int16(0)
 	// Check wether or not this node is stable
 	unstableLeaves := n.GetUnstableLeaves(w, max)
 	// if it is unstable begin Quiescence
@@ -497,7 +497,7 @@ func (n *Node) EvaluateWithQuiescence(w *Worker, alpha float32, beta float32, de
 }
 
 // NodeStatusScore Returns the Status evaluation of this node
-func (w *Worker) NodeStatusScore(n *Node, inv bool) float32 {
+func (w *Worker) NodeStatusScore(n *Node, inv bool) int16 {
 	// if this is the root dont check
 	if n.Value == nil {
 		return MinScore
@@ -522,12 +522,12 @@ func statusIsEnd(s chess.Method) bool {
 
 // statusEval will return the status score of the node, MinScore if this is a regular node
 // 1000 or -1000 for Checkmate, 0 for Stalemate
-func statusEval(s chess.Method, inv bool, depth int) float32 {
+func statusEval(s chess.Method, inv bool, depth int) int16 {
 	if s == chess.Checkmate {
 		if inv {
-			return -1000.0 + (-100 + float32(depth))
+			return -1000.0 + (-100 + int16(depth))
 		}
-		return 1000.0 + (100 - float32(depth))
+		return 1000.0 + (100 - int16(depth))
 	}
 	if s == chess.Stalemate {
 		return 0
@@ -660,11 +660,11 @@ func (n *Node) getSequenceE(e *Engine) []*chess.Move {
 }
 
 // EvalStatic will evaluate a board
-func EvaluatePosition(pos *chess.Position, clr chess.Color) float32 {
+func EvaluatePosition(pos *chess.Position, clr chess.Color) int16 {
 	// Calculate the Status of this Position
 	status := pos.Status()
 	// Calculate the Score of this Position
-	score := pos.Board().Evaluate(clr)
+	score := pos.Board().EvaluateFastI16()
 	// Check for Checkmate
 	if status == chess.Checkmate {
 		if pos.Turn() == clr {
@@ -679,14 +679,14 @@ func EvaluatePosition(pos *chess.Position, clr chess.Color) float32 {
 	return score
 }
 
-func f32min(a float32, b float32) float32 {
+func f32min(a int16, b int16) int16 {
 	if a < b {
 		return a
 	}
 	return b
 }
 
-func f32max(a float32, b float32) float32 {
+func f32max(a int16, b int16) int16 {
 	if a > b {
 		return a
 	}
