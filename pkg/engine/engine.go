@@ -30,10 +30,10 @@ import (
  */
 
 // MaxScore is Bigger than the Maximum Score Reachable
-const MaxScore = int16(3000)
+const MaxScore = int16(30000)
 
 // MinScore is Smaller than the Minimum Score Reachable
-const MinScore = int16(-3000)
+const MinScore = int16(-30000)
 
 // Engine is the Minimax Engine
 type Engine struct {
@@ -250,25 +250,6 @@ func (w *Worker) CommitToCache(hash [16]byte, eval int16) {
 	w.Engine.SharedCache.Store(hash, eval)
 }
 
-func (w *Worker) Search(node *Node, alpha int16, beta int16, depth int, max bool) {
-	currentDepth := depth
-	for {
-		nd, eval := w.MinimaxPruning(node, alpha, beta, currentDepth, max)
-		if w.Stop {
-			return
-		}
-		fmt.Println("Completed Depth ", currentDepth)
-		w.Root.BestChild = nd
-		w.Root.BestChildEval = eval
-		currentDepth++
-	}
-}
-
-// CalculateOrLoadQuiescence either calculates or loads the Quiescence Score for the Specified node
-func CalculateOrLoadQuiescence(node *Node, alpha int16, beta int16, depth int, max bool) {
-	//
-}
-
 // QuiescenseSearch will Search the Specified Position with a limited SubSearch to mitigate the Horizon effect
 // by extending the Search until a Stable(Quiet) Position can be statically evaluated or the Entire Branch can
 // be failed by cutof (soft or hard fail). The Expected Branching factor in a Quiescence Search is around 7 in
@@ -403,8 +384,16 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		sort.Sort(byMoveVariance(leaves))
 		// Iterate over the Children of the Current Node
 		for _, child := range leaves {
+			// Prevent Leaking the Loop iterator
+			alloc := *child
+			// Snapshot the current Simulation State
+			snapshot := *w.Simulation
+			// Update the Simulation using the Current Child's Move
+			w.Simulation = w.Simulation.Update(alloc.Value)
 			// Recursively Call Minimax for each child
-			nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, false)
+			nod, ev := w.MinimaxPruning(&alloc, alpha, beta, depth-1, false)
+			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
+			w.Simulation = &snapshot
 			// if the Current Child is better than the Previous best, it becomes the new Best
 			if ev > best {
 				best = ev
@@ -428,8 +417,16 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	sort.Sort(byMoveVariance(leaves))
 	// Iterate over the Children of the Current Node
 	for _, child := range leaves {
+		// Prevent Leaking the Loop iterator
+		alloc := *child
+		// Snapshot the current Simulation State
+		snapshot := *w.Simulation
+		// Update the Simulation using the Current Child's Move
+		w.Simulation = w.Simulation.Update(alloc.Value)
 		// Recursively Call Minimax for each child
 		nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, true)
+		// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
+		w.Simulation = &snapshot
 		// if the Current Child is worse than the Previous worst, it becomes the new worst
 		if ev < worst {
 			worst = ev
@@ -468,8 +465,6 @@ func (w *Worker) EvaluateStaticPosition(pos *chess.Position) int16 {
 
 // EvaluateWithQuiescence will return the Evaluation of the Node, using QuiescenseSearch if applicable
 func (n *Node) EvaluateWithQuiescence(w *Worker, alpha int16, beta int16, depth int, max bool) int16 {
-	// Simulate the State of this Node
-	w.simulateToNode(n)
 	// Hash the Current Position
 	posHash := w.Simulation.Hash()
 	// Get the Value for this Hash
@@ -506,8 +501,6 @@ func (w *Worker) NodeStatusScore(n *Node, inv bool) int16 {
 	if n.StatusChecked {
 		return n.StatusEval
 	}
-	// Simulate to the Node
-	w.simulateToNode(n)
 	// Evaluate the Status of the node using the specified inversion
 	n.StatusEval = statusEval(w.Simulation.Status(), inv, int(n.Depth))
 	// Set a flag that the status was evaluated so we dont evaluate again
@@ -525,9 +518,9 @@ func statusIsEnd(s chess.Method) bool {
 func statusEval(s chess.Method, inv bool, depth int) int16 {
 	if s == chess.Checkmate {
 		if inv {
-			return -1000.0 + (-100 + int16(depth))
+			return -10000 + (-100 + int16(depth))
 		}
-		return 1000.0 + (100 - int16(depth))
+		return 10000 + (100 - int16(depth))
 	}
 	if s == chess.Stalemate {
 		return 0
@@ -586,8 +579,6 @@ func (n *Node) GetUnstableLeaves(w *Worker, inv bool) []*Node {
 
 // GenerateLeaves will generate the leaves of the specified node
 func (n *Node) GenerateLeaves(w *Worker) []*Node {
-	// Get the Sequence of the Parent node we were called on
-	w.simulateToNode(n)
 	// Get the Valid Moves From this Position
 	vmoves := w.Simulation.ValidMoves()
 	// Initialize node collection
@@ -600,45 +591,6 @@ func (n *Node) GenerateLeaves(w *Worker) []*Node {
 	// Set the Leaves of MV
 	n.Leaves = nds
 	return nds
-}
-
-func (w *Worker) simulateToNode(n *Node) {
-	// Reset the Simulation to the Origin
-	w.resetSimulation()
-	// If this is the Root node we stop now, nothing todo
-	if n.Value == nil {
-		return
-	}
-	// Get the Sequence Required to get to this node
-	seq := n.getSequence(w)
-	// Apply those move to get to the Current Node
-	for _, ms := range seq {
-		w.Simulation = w.Simulation.Update((ms))
-	}
-}
-
-// resetSimulation will reset the Simulated game to the original state
-func (w *Worker) resetSimulation() {
-	npos := w.Origin
-	w.Simulation = &npos
-}
-
-// getSequence will return the full sequence of moves required to get to this node including the move of this node
-func (n *Node) getSequence(w *Worker) []*chess.Move {
-	seq := make([]*chess.Move, 0)
-	cnode := n
-	for {
-		// Add the Value of the Current Node to the Sequence
-		seq = append(seq, cnode.Value)
-		// Stop if there is no parent
-		if cnode.Parent == nil || cnode.Parent == w.Root {
-			break
-		}
-		// Go to the Parent
-		cnode = cnode.Parent
-	}
-	rev := reverseSequence(seq)
-	return rev
 }
 
 // getSequence will return the full sequence of moves required to get to this node including the move of this node
@@ -668,9 +620,9 @@ func EvaluatePosition(pos *chess.Position, clr chess.Color) int16 {
 	// Check for Checkmate
 	if status == chess.Checkmate {
 		if pos.Turn() == clr {
-			return -1000.0
+			return -10000
 		}
-		return 1000.0
+		return 10000
 	}
 	// Check for Stalemate
 	if status == chess.Stalemate {
