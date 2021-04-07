@@ -88,6 +88,12 @@ type Node struct {
 	StatusChecked bool
 }
 
+// Snapshot represents a snapshot of an evaluation state
+type Snapshot struct {
+	Position   chess.Position
+	Evaluation int16
+}
+
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
 	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
@@ -246,10 +252,10 @@ func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime tim
 }
 
 // MakeMove will make the Specified move in the Workers internal Simulation and incrementally update the Evaluation
-func (w *Worker) MakeMove(node *Node) int8 {
+func (w *Worker) MakeMove(node *Node) *Snapshot {
 	w.Engine.EvaluatedNodes++
-	// Declare the Restore value for Unmake move
-	restore := int8(-1)
+	// Make our snapshot to return
+	ret := Snapshot{Position: *w.Simulation, Evaluation: w.Evaluation}
 	// Store the Last Evaluation
 	lastEvaluation := w.Evaluation
 	// Snapshot the Previous board state
@@ -262,7 +268,6 @@ func (w *Worker) MakeMove(node *Node) int8 {
 	if node.Value.HasTag(chess.Capture) {
 		// Get the Captured Piece
 		capturedPiece := preMoveBoard.Piece(node.Value.S2)
-		restore = int8(capturedPiece)
 		// Remove its evaluation from the current Evaluation
 		w.Evaluation -= pieceValues[capturedPiece]
 		// Remove its Positional Evaluation
@@ -278,7 +283,7 @@ func (w *Worker) MakeMove(node *Node) int8 {
 	}
 	// King moves dont have positional evaluation
 	if piece == chess.BlackKing || piece == chess.WhiteKing {
-		return restore
+		return &ret
 	}
 	// Hash the Current Position
 	posHash := w.Simulation.Hash()
@@ -288,7 +293,7 @@ func (w *Worker) MakeMove(node *Node) int8 {
 	if err == nil {
 		w.Engine.LoadedFromPosCache++
 		w.Evaluation = storedV
-		return restore
+		return &ret
 	}
 	// Otherwise we incrementally Update the Evaluation
 	// Get the Status of the resulting board
@@ -329,53 +334,13 @@ func (w *Worker) MakeMove(node *Node) int8 {
 	// Store this node's increment
 	node.Increment = lastEvaluation - w.Evaluation
 	// Return the Restore value
-	return restore
+	return &ret
 }
 
 // Unmake move will revert a move and decrement the Evaluation accordingly
-func (w *Worker) UnmakeMove(node *Node, restore int8) {
-	// Snapshot the Current board state
-	currentBoard := w.Simulation.Board()
-	// Piece on S2
-	movedPiece := currentBoard.Piece(node.Value.S2)
-	// Check if the Move is a Capture promotion
-	if node.Value.HasTag(chess.Capture) && node.Value.Promo() != chess.NoPieceType {
-		// Delete the Promoted Piece
-		currentBoard.DeletePieceOnSquare(int8(node.Value.S2), movedPiece)
-		// Restore the Pawn that promoted
-		if w.Simulation.Turn() == chess.Black {
-			currentBoard.InjectPiece(int8(node.Value.S1), chess.WhitePawn)
-		} else {
-			currentBoard.InjectPiece(int8(node.Value.S1), chess.BlackPawn)
-		}
-		// Restore the Captured Piece
-		currentBoard.InjectPiece(int8(node.Value.S2), chess.Piece(restore))
-		// Make a null move to toggle the turn
-		w.Simulation.Update(nil)
-		// Check if this is a normal capture
-	} else if node.Value.HasTag(chess.Capture) {
-		//	Move the Piece back to where it came from
-		w.Simulation.Update(&chess.Move{S1: node.Value.S2, S2: node.Value.S1})
-		// Restore the Captured Piece
-		currentBoard.InjectPiece(int8(node.Value.S2), chess.Piece(restore))
-		// Check if this is a promotion
-	} else if node.Value.Promo() != chess.NoPieceType {
-		// Delete the Promoted Piece
-		currentBoard.DeletePieceOnSquare(int8(node.Value.S2), movedPiece)
-		// Restore the Pawn that promoted
-		if w.Simulation.Turn() == chess.Black {
-			currentBoard.InjectPiece(int8(node.Value.S1), chess.WhitePawn)
-		} else {
-			currentBoard.InjectPiece(int8(node.Value.S1), chess.BlackPawn)
-		}
-		// Make a null move to toggle the turn
-		w.Simulation.Update(nil)
-		// Otherwise just invert
-	} else {
-		w.Simulation.Update(&chess.Move{S1: node.Value.S2, S2: node.Value.S1})
-	}
-	// Restore the Previous evaluation by removing the increment of this node from the Evaluation
-	w.Evaluation -= node.Increment
+func (w *Worker) UnmakeMove(snap *Snapshot) {
+	w.Simulation = &snap.Position
+	w.Evaluation = snap.Evaluation
 }
 
 func (w *Worker) ReadFromCache(hash [16]byte) (int16, error) {
@@ -427,20 +392,14 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
 			alloc := *child
-			// Snapshot the State of the Simulation
-			snapshot := *w.Simulation
-			// Snapshot the current Board Evaluation
-			evaluationSnapshot := w.Evaluation
 			// Simulate the Move of the current Child
-			w.MakeMove(&alloc)
+			snapshot := w.MakeMove(&alloc)
 			// Set the Depth of the Child Node
 			alloc.Depth = node.Depth + 1
 			// Call QuiescenseSearch recursively
 			score := w.QuiescenseSearch(&alloc, alpha, beta, !max)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
-			w.Simulation = &snapshot
-			// Restore the Evaluation of the Snapshot
-			w.Evaluation = evaluationSnapshot
+			w.UnmakeMove(snapshot)
 			// Check if the current child causes beta cuttof
 			if score >= beta {
 				// fail hard
@@ -470,20 +429,14 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
 			alloc := *child
-			// Snapshot the State of the Simulation
-			snapshot := *w.Simulation
-			// Snapshot the current Board Evaluation
-			evaluationSnapshot := w.Evaluation
 			// Simulate the Move of the current Child
-			w.MakeMove(&alloc)
+			snapshot := w.MakeMove(&alloc)
 			// Set the Depth of the Child Node
 			alloc.Depth = node.Depth + 1
 			// Call QuiescenseSearch recursively
 			score := w.QuiescenseSearch(&alloc, alpha, beta, !max)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
-			w.Simulation = &snapshot
-			// Restore the Evaluation of the Snapshot
-			w.Evaluation = evaluationSnapshot
+			w.UnmakeMove(snapshot)
 			// Check if the Current child causes Alpha cuttof
 			if score <= alpha {
 				// fail soft
@@ -538,18 +491,12 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		for _, child := range leaves {
 			// Prevent Leaking the Loop iterator
 			alloc := *child
-			// Snapshot the current Simulation State
-			snapshot := *w.Simulation
-			// Snapshot the current Board Evaluation
-			evaluationSnapshot := w.Evaluation
 			// Simulate the Move of the current Child
-			w.MakeMove(&alloc)
+			snapshot := w.MakeMove(&alloc)
 			// Recursively Call Minimax for each child
 			nod, ev := w.MinimaxPruning(&alloc, alpha, beta, depth-1, false)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
-			w.Simulation = &snapshot
-			// Restore the Evaluation of the Snapshot
-			w.Evaluation = evaluationSnapshot
+			w.UnmakeMove(snapshot)
 			// if the Current Child is better than the Previous best, it becomes the new Best
 			if ev > best {
 				best = ev
@@ -575,18 +522,12 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	for _, child := range leaves {
 		// Prevent Leaking the Loop iterator
 		alloc := *child
-		// Snapshot the current Simulation State
-		snapshot := *w.Simulation
-		// Snapshot the current Board Evaluation
-		evaluationSnapshot := w.Evaluation
 		// Simulate the Move of the current Child
-		w.MakeMove(&alloc)
+		snapshot := w.MakeMove(&alloc)
 		// Recursively Call Minimax for each child
 		nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, true)
 		// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
-		w.Simulation = &snapshot
-		// Restore the Evaluation of the Snapshot
-		w.Evaluation = evaluationSnapshot
+		w.UnmakeMove(snapshot)
 		// if the Current Child is worse than the Previous worst, it becomes the new worst
 		if ev < worst {
 			worst = ev
