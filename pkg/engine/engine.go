@@ -21,6 +21,7 @@ import (
 *  https://www.duo.uio.no/bitstream/handle/10852/53769/master.pdf?sequence=1&isAllowed=y
 *  Remove all References from the Tree, only save the parents of the best node and the node currently being evaluated
 *  Implement Delta Pruning in Quiescence Search
+*  Implement Null-Move Pruning
 *  Implement Futility Pruning at the Frontier (depth==1)
 *  Scope out the Viability of SEE (Static Exchange Evaluation) in this framework
 *  Implement an AlphaBeta improvement (MTD(f),PVS,BNS)
@@ -41,6 +42,9 @@ const MaxScore = int16(30000)
 // MinScore is Smaller than the Minimum Score Reachable
 const MinScore = int16(-30000)
 
+// DeltaMax is the maximum gain in a single move permitted by the evaluation function
+const DeltaMax = 97
+
 // Engine is the Minimax Engine
 type Engine struct {
 	SearchMode         uint8 // 1 = SyncFull, 2 = SyncIterative, 3 = AMP
@@ -55,7 +59,6 @@ type Engine struct {
 	GeneratedNodes     uint
 	QGeneratedNodes    uint
 	EvaluatedNodes     uint
-	QEvaluatedNodes    uint
 	Visited            uint
 	QVisited           uint
 	LoadedFromPosCache uint
@@ -64,6 +67,7 @@ type Engine struct {
 
 type Worker struct {
 	Simulation *chess.Position
+	Evaluation int16
 	Origin     chess.Position
 	Root       *Node
 	Depth      int
@@ -78,6 +82,7 @@ type Node struct {
 	QDepth        uint8
 	BestChild     *Node
 	BestChildEval int16
+	Increment     int16
 	Value         *chess.Move
 	StatusEval    int16
 	StatusChecked bool
@@ -198,7 +203,7 @@ func (e *Engine) Search() *chess.Move {
 	// Log some information about the search we just completed
 	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v LD:%v\n", bestNode.getSequence(e), math.Round(float64(bestScore)*100)/100, origin, bestNode.Depth, bestNode.QDepth, u8Max(bestNode.Depth, bestNode.QDepth))
 	fmt.Printf("[YGG] Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
-	fmt.Printf("[YGG] QGenerated:%v QVisited:%v QEvaluated:%v FrontierUnstable:%v\n", e.QGeneratedNodes, e.QVisited, e.QEvaluatedNodes, e.FrontierUnstable)
+	fmt.Printf("[YGG] QGenerated:%v QVisited:%v FrontierUnstable:%v\n", e.QGeneratedNodes, e.QVisited, e.FrontierUnstable)
 	return origin
 }
 
@@ -212,6 +217,7 @@ func u8Max(a uint8, b uint8) uint8 {
 // SearchSynchronousFull will fully search the tree to the Specified Depth
 func (e *Engine) SearchSynchronousFull(game *chess.Game, depth int) (*Node, int16) {
 	w := &Worker{Engine: e, Simulation: game.Position(), Origin: *game.Position(), Depth: depth, Root: &Node{Depth: 0, QDepth: 0, StatusEval: MinScore, StatusChecked: true}}
+	w.Evaluation = w.Simulation.Board().EvaluateFastI16()
 	return w.MinimaxPruning(w.Root, MinScore, MaxScore, depth, true)
 }
 
@@ -226,6 +232,7 @@ func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime tim
 		w.Stop = true
 	}()
 	for {
+		w.Evaluation = w.Simulation.Board().EvaluateFastI16()
 		nd, score := w.MinimaxPruning(w.Root, MinScore, MaxScore, currentDepth, true)
 		if w.Stop {
 			break
@@ -236,6 +243,139 @@ func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime tim
 		currentDepth++
 	}
 	return bestNode, bestScore
+}
+
+// MakeMove will make the Specified move in the Workers internal Simulation and incrementally update the Evaluation
+func (w *Worker) MakeMove(node *Node) int8 {
+	w.Engine.EvaluatedNodes++
+	// Declare the Restore value for Unmake move
+	restore := int8(-1)
+	// Store the Last Evaluation
+	lastEvaluation := w.Evaluation
+	// Snapshot the Previous board state
+	preMoveBoard := *w.Simulation.Board()
+	// Update the Current Simualtion state
+	w.Simulation = w.Simulation.Update(node.Value)
+	// Get the Piece Being Moved
+	piece := preMoveBoard.Piece(node.Value.S1)
+	// Check if a piece was Captured
+	if node.Value.HasTag(chess.Capture) {
+		// Get the Captured Piece
+		capturedPiece := preMoveBoard.Piece(node.Value.S2)
+		restore = int8(capturedPiece)
+		// Remove its evaluation from the current Evaluation
+		w.Evaluation -= pieceValues[capturedPiece]
+		// Remove its Positional Evaluation
+		if capturedPiece == chess.WhitePawn {
+			w.Evaluation -= whitePawnPositionalValuesI16[node.Value.S2]
+		} else if capturedPiece == chess.BlackPawn {
+			w.Evaluation -= blackPawnPositionalValuesI16[node.Value.S2]
+		} else if capturedPiece == chess.BlackBishop || capturedPiece == chess.BlackKnight || capturedPiece == chess.BlackRook || capturedPiece == chess.BlackQueen {
+			w.Evaluation -= blackPiecePositionalValuesI16[node.Value.S2]
+		} else if capturedPiece == chess.WhiteBishop || capturedPiece == chess.WhiteKnight || capturedPiece == chess.WhiteRook || capturedPiece == chess.WhiteQueen {
+			w.Evaluation -= whitePiecePositionalValuesI16[node.Value.S2]
+		}
+	}
+	// King moves dont have positional evaluation
+	if piece == chess.BlackKing || piece == chess.WhiteKing {
+		return restore
+	}
+	// Hash the Current Position
+	posHash := w.Simulation.Hash()
+	// Get the Value for this Hash
+	storedV, err := w.ReadFromCache(posHash)
+	// If we have a stored value for this Hash use it
+	if err == nil {
+		w.Engine.LoadedFromPosCache++
+		w.Evaluation = storedV
+		return restore
+	}
+	// Otherwise we incrementally Update the Evaluation
+	// Get the Status of the resulting board
+	status := w.Simulation.Status()
+	// Check for Checkmate
+	if status == chess.Checkmate {
+		if w.Simulation.Turn() == chess.Black {
+			// Override the Evaluation with the Checkmate Value for White
+			w.Evaluation = -10000
+		}
+		// Override the Evaluation with the Checkmate Value for Black
+		w.Evaluation = 10000
+	}
+	// Get the Positional Differential caused by the move
+	if piece == chess.WhitePawn {
+		w.Evaluation += whitePawnPositionalValuesI16[node.Value.S2] - whitePawnPositionalValuesI16[node.Value.S1]
+		// Check if a Promotion Happened
+		prom := node.Value.Promo()
+		if prom != chess.NoPieceType {
+			// Add the Piece that was Promoted into to the Evaluation and remove the Pawn that was used
+			w.Evaluation += pieceValues[prom] - pieceValues[chess.WhitePawn]
+		}
+	} else if piece == chess.BlackPawn {
+		w.Evaluation += blackPawnPositionalValuesI16[node.Value.S2] - blackPawnPositionalValuesI16[node.Value.S1]
+		// Check if a Promotion Happened
+		prom := node.Value.Promo()
+		if prom != chess.NoPieceType {
+			// Add the Piece that was Promoted into to the Evaluation and remove the Pawn that was used
+			w.Evaluation += pieceValues[prom] - pieceValues[chess.BlackPawn]
+		}
+	} else if piece == chess.BlackBishop || piece == chess.BlackKnight || piece == chess.BlackRook || piece == chess.BlackQueen {
+		w.Evaluation += blackPiecePositionalValuesI16[node.Value.S2] - blackPiecePositionalValuesI16[node.Value.S1]
+	} else if piece == chess.WhiteBishop || piece == chess.WhiteKnight || piece == chess.WhiteRook || piece == chess.WhiteQueen {
+		w.Evaluation += whitePiecePositionalValuesI16[node.Value.S2] - whitePiecePositionalValuesI16[node.Value.S1]
+	}
+	// Store the Value in the Transposition Table
+	w.CommitToCache(posHash, w.Evaluation)
+	// Store this node's increment
+	node.Increment = lastEvaluation - w.Evaluation
+	// Return the Restore value
+	return restore
+}
+
+// Unmake move will revert a move and decrement the Evaluation accordingly
+func (w *Worker) UnmakeMove(node *Node, restore int8) {
+	// Snapshot the Current board state
+	currentBoard := w.Simulation.Board()
+	// Piece on S2
+	movedPiece := currentBoard.Piece(node.Value.S2)
+	// Check if the Move is a Capture promotion
+	if node.Value.HasTag(chess.Capture) && node.Value.Promo() != chess.NoPieceType {
+		// Delete the Promoted Piece
+		currentBoard.DeletePieceOnSquare(int8(node.Value.S2), movedPiece)
+		// Restore the Pawn that promoted
+		if w.Simulation.Turn() == chess.Black {
+			currentBoard.InjectPiece(int8(node.Value.S1), chess.WhitePawn)
+		} else {
+			currentBoard.InjectPiece(int8(node.Value.S1), chess.BlackPawn)
+		}
+		// Restore the Captured Piece
+		currentBoard.InjectPiece(int8(node.Value.S2), chess.Piece(restore))
+		// Make a null move to toggle the turn
+		w.Simulation.Update(nil)
+		// Check if this is a normal capture
+	} else if node.Value.HasTag(chess.Capture) {
+		//	Move the Piece back to where it came from
+		w.Simulation.Update(&chess.Move{S1: node.Value.S2, S2: node.Value.S1})
+		// Restore the Captured Piece
+		currentBoard.InjectPiece(int8(node.Value.S2), chess.Piece(restore))
+		// Check if this is a promotion
+	} else if node.Value.Promo() != chess.NoPieceType {
+		// Delete the Promoted Piece
+		currentBoard.DeletePieceOnSquare(int8(node.Value.S2), movedPiece)
+		// Restore the Pawn that promoted
+		if w.Simulation.Turn() == chess.Black {
+			currentBoard.InjectPiece(int8(node.Value.S1), chess.WhitePawn)
+		} else {
+			currentBoard.InjectPiece(int8(node.Value.S1), chess.BlackPawn)
+		}
+		// Make a null move to toggle the turn
+		w.Simulation.Update(nil)
+		// Otherwise just invert
+	} else {
+		w.Simulation.Update(&chess.Move{S1: node.Value.S2, S2: node.Value.S1})
+	}
+	// Restore the Previous evaluation by removing the increment of this node from the Evaluation
+	w.Evaluation -= node.Increment
 }
 
 func (w *Worker) ReadFromCache(hash [16]byte) (int16, error) {
@@ -268,7 +408,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		return nseval
 	}
 	// Get the Standing Pat Score using Static Evaluation
-	standingPat := w.EvaluateStaticPosition(w.Simulation)
+	standingPat := w.Evaluation
 	// if we are in a maximizing branch
 	if max {
 		// Check if the Standing Pat Causes Beta Cutof
@@ -289,14 +429,18 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 			alloc := *child
 			// Snapshot the State of the Simulation
 			snapshot := *w.Simulation
-			// Simulate the Move of the current child
-			w.Simulation = w.Simulation.Update(alloc.Value)
+			// Snapshot the current Board Evaluation
+			evaluationSnapshot := w.Evaluation
+			// Simulate the Move of the current Child
+			w.MakeMove(&alloc)
 			// Set the Depth of the Child Node
 			alloc.Depth = node.Depth + 1
 			// Call QuiescenseSearch recursively
 			score := w.QuiescenseSearch(&alloc, alpha, beta, !max)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
 			w.Simulation = &snapshot
+			// Restore the Evaluation of the Snapshot
+			w.Evaluation = evaluationSnapshot
 			// Check if the current child causes beta cuttof
 			if score >= beta {
 				// fail hard
@@ -328,14 +472,18 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 			alloc := *child
 			// Snapshot the State of the Simulation
 			snapshot := *w.Simulation
-			// Simulate the Move of the current child
-			w.Simulation = w.Simulation.Update(alloc.Value)
+			// Snapshot the current Board Evaluation
+			evaluationSnapshot := w.Evaluation
+			// Simulate the Move of the current Child
+			w.MakeMove(&alloc)
 			// Set the Depth of the Child Node
 			alloc.Depth = node.Depth + 1
 			// Call QuiescenseSearch recursively
 			score := w.QuiescenseSearch(&alloc, alpha, beta, !max)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
 			w.Simulation = &snapshot
+			// Restore the Evaluation of the Snapshot
+			w.Evaluation = evaluationSnapshot
 			// Check if the Current child causes Alpha cuttof
 			if score <= alpha {
 				// fail soft
@@ -392,12 +540,16 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 			alloc := *child
 			// Snapshot the current Simulation State
 			snapshot := *w.Simulation
-			// Update the Simulation using the Current Child's Move
-			w.Simulation = w.Simulation.Update(alloc.Value)
+			// Snapshot the current Board Evaluation
+			evaluationSnapshot := w.Evaluation
+			// Simulate the Move of the current Child
+			w.MakeMove(&alloc)
 			// Recursively Call Minimax for each child
 			nod, ev := w.MinimaxPruning(&alloc, alpha, beta, depth-1, false)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
 			w.Simulation = &snapshot
+			// Restore the Evaluation of the Snapshot
+			w.Evaluation = evaluationSnapshot
 			// if the Current Child is better than the Previous best, it becomes the new Best
 			if ev > best {
 				best = ev
@@ -425,12 +577,16 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		alloc := *child
 		// Snapshot the current Simulation State
 		snapshot := *w.Simulation
-		// Update the Simulation using the Current Child's Move
-		w.Simulation = w.Simulation.Update(alloc.Value)
+		// Snapshot the current Board Evaluation
+		evaluationSnapshot := w.Evaluation
+		// Simulate the Move of the current Child
+		w.MakeMove(&alloc)
 		// Recursively Call Minimax for each child
 		nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, true)
 		// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
 		w.Simulation = &snapshot
+		// Restore the Evaluation of the Snapshot
+		w.Evaluation = evaluationSnapshot
 		// if the Current Child is worse than the Previous worst, it becomes the new worst
 		if ev < worst {
 			worst = ev
@@ -446,27 +602,6 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	return worstNode, worst
 }
 
-// EvaluateStaticPosition will evaluate a Position statically, if an evaluation exists in the Hashtable, it is loaded instead
-func (w *Worker) EvaluateStaticPosition(pos *chess.Position) int16 {
-	// Hash the Current Position
-	posHash := pos.Hash()
-	// Get the Value for this Hash
-	storedV, err := w.ReadFromCache(posHash)
-	// If we have a stored value for this Hash return it
-	if err == nil {
-		w.Engine.LoadedFromPosCache++
-		return storedV
-	}
-	score := int16(0)
-	// Perform Static Evaluation
-	score = EvaluatePosition(w.Simulation, w.Engine.Color)
-	// Increment the Evaluations Performed in Quiescence Search
-	w.Engine.QEvaluatedNodes++
-	// Save this Evaluation to the Cache
-	w.CommitToCache(posHash, score)
-	return score
-}
-
 // EvaluateWithQuiescence will return the Evaluation of the Node, using QuiescenseSearch if applicable
 func (n *Node) EvaluateWithQuiescence(w *Worker, alpha int16, beta int16, depth int, max bool) int16 {
 	score := int16(0)
@@ -478,19 +613,8 @@ func (n *Node) EvaluateWithQuiescence(w *Worker, alpha int16, beta int16, depth 
 		score = w.QuiescenseSearch(n, alpha, beta, max)
 		// if the node is stable perform Static Evaluation
 	} else {
-		w.Engine.EvaluatedNodes++
-		// Hash the Current Position
-		posHash := w.Simulation.Hash()
-		// Get the Value for this Hash
-		storedV, err := w.ReadFromCache(posHash)
-		// If we have a stored value for this Hash return it
-		if err == nil {
-			w.Engine.LoadedFromPosCache++
-			return storedV
-		}
-		score = EvaluatePosition(w.Simulation, w.Engine.Color)
-		// Save this Evaluation to the Cache
-		w.CommitToCache(posHash, score)
+		// Otherwise Use the static evaluation
+		score = w.Evaluation
 	}
 	return score
 }
@@ -559,7 +683,7 @@ func (n *Node) GetUnstableLeaves(w *Worker, inv bool, check bool) []*Node {
 	w.Engine.GeneratedNodes -= uint(len(leaves))
 	unstable := []*Node{}
 	for _, nd := range leaves {
-		if check || (nd.Value.HasTag(chess.Capture) || nd.Value.HasTag(chess.Check)) {
+		if check || (nd.Value.HasTag(chess.Capture) || nd.Value.HasTag(chess.Check)) || nd.Value.Promo() != chess.NoPieceType {
 			w.Engine.QGeneratedNodes++
 			unstable = append(unstable, nd)
 		}
