@@ -9,6 +9,9 @@ const MinScore = int16(-30000)
 // DeltaMax is the maximum gain in a single move permitted by the evaluation function
 const DeltaMax = 97
 
+// Delta is the Safety margin for Delta Pruning
+const Delta = 20
+
 var whitePawnPositionalValuesI16 = [64]int16{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,

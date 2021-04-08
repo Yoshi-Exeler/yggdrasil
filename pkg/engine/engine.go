@@ -331,19 +331,21 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		// if this node is a terminating node, return its evaluation
 		return nseval
 	}
-	// Get the Standing Pat Score using Static Evaluation
-	standingPat := w.Evaluation
 	// if we are in a maximizing branch
 	if max {
 		// Check if the Standing Pat Causes Beta Cutof
-		if standingPat >= beta {
+		if w.Evaluation >= beta {
 			// return beta (fail hard)
 			return beta
 		}
 		// Check if the standing pat is greater than alpha
-		if standingPat > alpha {
+		if w.Evaluation > alpha {
 			// raise alpha
-			alpha = standingPat
+			alpha = w.Evaluation
+		}
+		// Check if alpha can even be improved
+		if w.Evaluation < alpha-DeltaMax {
+			return alpha
 		}
 		// Generate the Unstable Children of the Node, make sure not to influence the sim
 		unstable := node.GetUnstableLeaves(w, max, node.IsCheck())
@@ -353,6 +355,15 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
 			alloc := *child
+			// Only if the current Move is a Capture, we do delta pruning
+			if alloc.Value.HasTag(chess.Capture) {
+				// Get the Piece Being Captured
+				capturedPiece := w.Simulation.Board().Piece(alloc.Value.S2)
+				// Check that the Value of the Captured Piece Plus Delta is greater than alpha (Delta Pruning)
+				if (w.Evaluation - pieceValues[capturedPiece] + Delta) < alpha {
+					continue
+				}
+			}
 			// Simulate the Move of the current Child
 			snapshot := w.MakeMove(&alloc)
 			// Set the Depth of the Child Node
@@ -375,14 +386,18 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		// if we are in a minimizing branch, we must treat alpha as the lower bound and beta as the upper bound
 	} else {
 		// Check if the Standing Pat Causes Alpha Cuttof
-		if standingPat <= alpha {
+		if w.Evaluation <= alpha {
 			// fail soft
 			return alpha
 		}
 		// Check if the standing pat lowers beta
-		if standingPat < beta {
+		if w.Evaluation < beta {
 			// lower beta
-			beta = standingPat
+			beta = w.Evaluation
+		}
+		// Check if beta can even be lowered
+		if w.Evaluation > beta+DeltaMax {
+			return beta
 		}
 		// Generate the Unstable Children of the Node
 		unstable := node.GetUnstableLeaves(w, max, node.IsCheck())
@@ -392,6 +407,15 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
 			alloc := *child
+			// Only if the current Move is a Capture, we do delta pruning
+			if alloc.Value.HasTag(chess.Capture) {
+				// Get the Piece Being Captured
+				capturedPiece := w.Simulation.Board().Piece(alloc.Value.S2)
+				// Check that the Value of the Captured Piece Plus Delta is greater than alpha (Delta Pruning)
+				if (w.Evaluation - pieceValues[capturedPiece] - Delta) > beta {
+					continue
+				}
+			}
 			// Simulate the Move of the current Child
 			snapshot := w.MakeMove(&alloc)
 			// Set the Depth of the Child Node
@@ -440,7 +464,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	}
 	// If we are at or below the target depth and not in check, Evaluate this Node using Quiescence Search if neccessary
 	if depth <= 0 && !node.IsCheck() {
-		return node, node.EvaluateWithQuiescence(w, alpha, beta, depth, max)
+		return node, w.QuiescenseSearch(node, alpha, beta, max)
 	}
 	// If we are in a maximizing Branch
 	if max {
@@ -508,23 +532,6 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		}
 	}
 	return worstNode, worst
-}
-
-// EvaluateWithQuiescence will return the Evaluation of the Node, using QuiescenseSearch if applicable
-func (n *Node) EvaluateWithQuiescence(w *Worker, alpha int16, beta int16, depth int, max bool) int16 {
-	score := int16(0)
-	// Check wether or not this node is stable
-	unstableLeaves := n.GetUnstableLeaves(w, max, false)
-	// if it is unstable begin Quiescence
-	if len(unstableLeaves) > 0 {
-		w.Engine.FrontierUnstable++
-		score = w.QuiescenseSearch(n, alpha, beta, max)
-		// if the node is stable perform Static Evaluation
-	} else {
-		// Otherwise Use the static evaluation
-		score = w.Evaluation
-	}
-	return score
 }
 
 // NodeStatusScore Returns the Status evaluation of this node
