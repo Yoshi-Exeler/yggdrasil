@@ -33,6 +33,18 @@ func (a byMVVLVA) Less(i, j int) bool {
 	return false
 }
 
+// captureValue returns the material change caused by the capture
+func (w *Worker) captureValue(move *chess.Move) int16 {
+	// Get the Victim and Attacker Pieces
+	victim := w.Simulation.Board().Piece(move.S2)
+	attacker := w.Simulation.Board().Piece(move.S1)
+	// Get the Values for the Pieces
+	victimValue := abs(pieceValues[victim])
+	attackerValue := abs(pieceValues[attacker])
+	// Calculate the Capture Differential and return it
+	return victimValue - attackerValue
+}
+
 type byOpeningLength []*opening.Opening
 
 func (a byOpeningLength) Len() int           { return len(a) }
