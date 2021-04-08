@@ -89,7 +89,7 @@ type Snapshot struct {
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
-	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
+	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
 }
 
 // Search will Search will produce a move to play next
@@ -152,13 +152,15 @@ func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime tim
 		time.Sleep(processingTime)
 		w.Stop = true
 	}()
+	start := time.Now()
 	for {
 		w.Evaluation = w.Simulation.Board().EvaluateFastI16()
 		nd, score := w.MinimaxPruning(w.Root, MinScore, MaxScore, currentDepth, true)
 		if w.Stop {
 			break
 		}
-		fmt.Println("Completed depth ", currentDepth, nd, score)
+		elapsed := time.Since(start)
+		fmt.Printf("Completed depth=%v target=%v elapsed=%v\n", currentDepth, score, elapsed)
 		bestNode = nd
 		bestScore = score
 		currentDepth++
@@ -290,7 +292,7 @@ func (w *Worker) SaveKillerMove(move *chess.Move, depth int8) {
 		return
 	}
 	// Check that this move is not currently in the KMT
-	if w.KillerMoves[depth][0].String() != move.String() && w.KillerMoves[depth][1].String() != move.String() {
+	if !SameMove(w.KillerMoves[depth][0], move) && !SameMove(w.KillerMoves[depth][1], move) {
 		// Add it to a slot in the KMT
 		if w.KMTFlip {
 			w.KillerMoves[depth] = [2]*chess.Move{move, w.KillerMoves[depth][1]}
@@ -304,12 +306,12 @@ func (w *Worker) SaveKillerMove(move *chess.Move, depth int8) {
 // IsKillerMove queries the KMT to check whether or not a move is a killer move
 func (w *Worker) IsKillerMove(mv *chess.Move, depth int8) bool {
 	if w.KillerMoves[depth][0] != nil {
-		if w.KillerMoves[depth][0].String() == mv.String() {
+		if SameMove(w.KillerMoves[depth][0], mv) {
 			return true
 		}
 	}
 	if w.KillerMoves[depth][1] != nil {
-		if w.KillerMoves[depth][1].String() == mv.String() {
+		if SameMove(w.KillerMoves[depth][1], mv) {
 			return true
 		}
 	}
