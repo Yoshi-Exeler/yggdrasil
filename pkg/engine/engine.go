@@ -36,15 +36,6 @@ import (
 * Engine misses mate in one and instead tries to play mate in four 3k4/1pp2pr1/3P3p/7b/p7/P3q3/5R2/5K2 b - - 7 40
  */
 
-// MaxScore is Bigger than the Maximum Score Reachable
-const MaxScore = int16(30000)
-
-// MinScore is Smaller than the Minimum Score Reachable
-const MinScore = int16(-30000)
-
-// DeltaMax is the maximum gain in a single move permitted by the evaluation function
-const DeltaMax = 97
-
 // Engine is the Minimax Engine
 type Engine struct {
 	SearchMode         uint8 // 1 = SyncFull, 2 = SyncIterative, 3 = AMP
@@ -96,7 +87,7 @@ type Snapshot struct {
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
-	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
+	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
 }
 
 // GetOpeningMove returns an opening theory move from ECO if one exists
@@ -151,19 +142,51 @@ func (e *Engine) GetOpeningName() string {
 	return ""
 }
 
-// ByMoveVariance will Sort by Captures and Checks, which have the highest potential score variance
-type byMoveVariance []*Node
+type byMVVLVA struct {
+	Nodes  []*Node
+	Worker *Worker
+}
 
-func (a byMoveVariance) Len() int      { return len(a) }
-func (a byMoveVariance) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-func (a byMoveVariance) Less(i, j int) bool {
-	if a[i].Value.HasTag(chess.Check) && !a[j].Value.HasTag(chess.Check) {
+func (a byMVVLVA) Len() int      { return len(a.Nodes) }
+func (a byMVVLVA) Swap(i, j int) { a.Nodes[i], a.Nodes[j] = a.Nodes[j], a.Nodes[i] }
+func (a byMVVLVA) Less(i, j int) bool {
+	// Promotions should always be searched first
+	if a.Nodes[i].Value.Promo() != chess.NoPieceType && a.Nodes[j].Value.Promo() == chess.NoPieceType {
 		return true
 	}
-	if a[i].Value.HasTag(chess.Capture) && !a[j].Value.HasTag(chess.Capture) {
+	// If both moves are captures, sort them using MVVLVA
+	if a.Nodes[i].Value.HasTag(chess.Capture) && a.Nodes[j].Value.HasTag(chess.Capture) {
+		return a.Worker.captureValue(a.Nodes[i].Value) > a.Worker.captureValue(a.Nodes[j].Value)
+	}
+	// If one move is a capture search it first
+	if a.Nodes[i].Value.HasTag(chess.Check) && !a.Nodes[j].Value.HasTag(chess.Check) {
 		return true
 	}
+	// if a move is a check, search it before positionals
+	if a.Nodes[i].Value.HasTag(chess.Capture) && !a.Nodes[j].Value.HasTag(chess.Capture) {
+		return true
+	}
+
 	return false
+}
+
+func abs(v int16) int16 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// captureValue returns the material change caused by the capture
+func (w *Worker) captureValue(move *chess.Move) int16 {
+	// Get the Victim and Attacker Pieces
+	victim := w.Simulation.Board().Piece(move.S2)
+	attacker := w.Simulation.Board().Piece(move.S1)
+	// Get the Values for the Pieces
+	victimValue := abs(pieceValues[victim])
+	attackerValue := abs(pieceValues[attacker])
+	// Calculate the Capture Differential and return it
+	return victimValue - attackerValue
 }
 
 type byOpeningLength []*opening.Opening
@@ -388,6 +411,8 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		}
 		// Generate the Unstable Children of the Node, make sure not to influence the sim
 		unstable := node.GetUnstableLeaves(w, max, node.IsCheck())
+		// Sort the Unstable nodes using MVVLVA to increase search speed
+		sort.Sort(byMVVLVA{Nodes: unstable, Worker: w})
 		// Iterate over the Unstable children of the node
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
@@ -425,6 +450,8 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		}
 		// Generate the Unstable Children of the Node
 		unstable := node.GetUnstableLeaves(w, max, node.IsCheck())
+		// Sort the Unstable nodes using MVVLVA to increase search speed
+		sort.Sort(byMVVLVA{Nodes: unstable, Worker: w})
 		// Iterate over the Unstable children of the node
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
@@ -486,7 +513,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		// Generate the Children of the current node
 		leaves := node.GenerateLeaves(w)
 		// Sort them by their Expected impact on the Evaluation (Captures and Checks first)
-		sort.Sort(byMoveVariance(leaves))
+		sort.Sort(byMVVLVA{Nodes: leaves, Worker: w})
 		// Iterate over the Children of the Current Node
 		for _, child := range leaves {
 			// Prevent Leaking the Loop iterator
@@ -517,7 +544,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	// Generate the Children of the current node
 	leaves := node.GenerateLeaves(w)
 	// Sort them by their Expected impact on the Evaluation (Captures and Checks first)
-	sort.Sort(byMoveVariance(leaves))
+	sort.Sort(byMVVLVA{Nodes: leaves, Worker: w})
 	// Iterate over the Children of the Current Node
 	for _, child := range leaves {
 		// Prevent Leaking the Loop iterator
