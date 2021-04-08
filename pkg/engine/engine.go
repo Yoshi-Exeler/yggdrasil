@@ -57,21 +57,22 @@ type Engine struct {
 }
 
 type Worker struct {
-	Simulation *chess.Position
-	Evaluation int16
-	Origin     chess.Position
-	Root       *Node
-	Depth      int
-	Engine     *Engine
-	PVTable    *sync.Map
-	Stop       bool
+	Simulation  *chess.Position
+	Evaluation  int16
+	Origin      chess.Position
+	Root        *Node
+	Depth       int
+	Engine      *Engine
+	KillerMoves map[int8][2]*chess.Move
+	KMTFlip     bool
+	Stop        bool
 }
 
 // Node is a node in the Engine
 type Node struct {
 	Parent        *Node
-	Depth         uint8
-	QDepth        uint8
+	Depth         int8
+	QDepth        int8
 	BestChild     *Node
 	BestChildEval int16
 	Increment     int16
@@ -88,7 +89,7 @@ type Snapshot struct {
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
-	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
+	return &Engine{UseOpeningTheory: false, Depth: 5, SearchMode: 1, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
 }
 
 // Search will Search will produce a move to play next
@@ -126,9 +127,9 @@ func (e *Engine) Search() *chess.Move {
 	// Get the Origin Move of the Best Leaf, i.e. the move to play
 	origin := bestNode.getSequence(e)[0]
 	// Log some information about the search we just completed
-	fmt.Printf("[YGG] Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v LD:%v\n", bestNode.getSequence(e), math.Round(float64(bestScore)*100)/100, origin, bestNode.Depth, bestNode.QDepth, u8Max(bestNode.Depth, bestNode.QDepth))
-	fmt.Printf("[YGG] Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
-	fmt.Printf("[YGG] QGenerated:%v QVisited:%v FrontierUnstable:%v\n", e.QGeneratedNodes, e.QVisited, e.FrontierUnstable)
+	fmt.Printf("Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v\n", bestNode.getSequence(e), math.Round(float64(bestScore)*100)/100, origin, bestNode.Depth, bestNode.QDepth)
+	fmt.Printf("Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
+	fmt.Printf("QGenerated:%v QVisited:%v FrontierUnstable:%v\n", e.QGeneratedNodes, e.QVisited, e.FrontierUnstable)
 	return origin
 }
 
@@ -136,6 +137,7 @@ func (e *Engine) Search() *chess.Move {
 func (e *Engine) SearchSynchronousFull(game *chess.Game, depth int) (*Node, int16) {
 	w := &Worker{Engine: e, Simulation: game.Position(), Origin: *game.Position(), Depth: depth, Root: &Node{Depth: 0, QDepth: 0, StatusEval: MinScore, StatusChecked: true}}
 	w.Evaluation = w.Simulation.Board().EvaluateFastI16()
+	w.KillerMoves = make(map[int8][2]*chess.Move)
 	return w.MinimaxPruning(w.Root, MinScore, MaxScore, depth, true)
 }
 
@@ -145,6 +147,7 @@ func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime tim
 	bestNode := &Node{}
 	bestScore := MinScore
 	w := &Worker{Engine: e, Simulation: game.Position(), Origin: *game.Position(), Root: &Node{Depth: 0, QDepth: 0, StatusEval: MinScore, StatusChecked: true}}
+	w.KillerMoves = make(map[int8][2]*chess.Move)
 	go func() {
 		time.Sleep(processingTime)
 		w.Stop = true
@@ -269,6 +272,48 @@ func (w *Worker) ReadFromCache(hash [16]byte) (int16, error) {
 
 func (w *Worker) CommitToCache(hash [16]byte, eval int16) {
 	w.Engine.SharedCache.Store(hash, eval)
+}
+
+// IsQuietMove returns wether a move is a Quiet (a pure positional move)
+func (w *Worker) IsQuietMove(mv *chess.Move) bool {
+	return !mv.HasTag(chess.Capture) && !mv.HasTag(chess.Check) && mv.Promo() == chess.NoPieceType
+}
+
+// SaveKillerMove will save the specified move to the KillerMove table, ensuring no duplicates
+func (w *Worker) SaveKillerMove(move *chess.Move, depth int8) {
+	if w.KillerMoves[depth][0] == nil {
+		w.KillerMoves[depth] = [2]*chess.Move{move, w.KillerMoves[depth][1]}
+		return
+	}
+	if w.KillerMoves[depth][1] == nil {
+		w.KillerMoves[depth] = [2]*chess.Move{w.KillerMoves[depth][0], move}
+		return
+	}
+	// Check that this move is not currently in the KMT
+	if w.KillerMoves[depth][0].String() != move.String() && w.KillerMoves[depth][1].String() != move.String() {
+		// Add it to a slot in the KMT
+		if w.KMTFlip {
+			w.KillerMoves[depth] = [2]*chess.Move{move, w.KillerMoves[depth][1]}
+		} else {
+			w.KillerMoves[depth] = [2]*chess.Move{w.KillerMoves[depth][0], move}
+		}
+		w.KMTFlip = !w.KMTFlip
+	}
+}
+
+// IsKillerMove queries the KMT to check whether or not a move is a killer move
+func (w *Worker) IsKillerMove(mv *chess.Move, depth int8) bool {
+	if w.KillerMoves[depth][0] != nil {
+		if w.KillerMoves[depth][0].String() == mv.String() {
+			return true
+		}
+	}
+	if w.KillerMoves[depth][1] != nil {
+		if w.KillerMoves[depth][1].String() == mv.String() {
+			return true
+		}
+	}
+	return false
 }
 
 // QuiescenseSearch will Search the Specified Position with a limited SubSearch to mitigate the Horizon effect
@@ -422,6 +467,8 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 			alpha = i16max(alpha, ev)
 			// Check if the Current Child Causes Pruning, in which case we can stop the Iteration immediately
 			if beta <= alpha {
+				// Save this Move to the Killer Move Table to improve move ordering in sibiling nodes
+				w.SaveKillerMove(alloc.Value, alloc.Depth)
 				break
 			}
 		}
@@ -453,6 +500,8 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		beta = i16min(beta, ev)
 		// Check if the Current Child Causes Pruning, in which case we can stop the Iteration immediately
 		if beta <= alpha {
+			// Save this Move to the Killer Move Table to improve move ordering in sibiling nodes
+			w.SaveKillerMove(alloc.Value, alloc.Depth)
 			break
 		}
 	}

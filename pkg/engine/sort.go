@@ -13,6 +13,10 @@ type byMVVLVA struct {
 func (a byMVVLVA) Len() int      { return len(a.Nodes) }
 func (a byMVVLVA) Swap(i, j int) { a.Nodes[i], a.Nodes[j] = a.Nodes[j], a.Nodes[i] }
 func (a byMVVLVA) Less(i, j int) bool {
+	// Killer Moves have highest priority
+	if a.Worker.IsKillerMove(a.Nodes[i].Value, a.Nodes[i].Depth) && !a.Worker.IsKillerMove(a.Nodes[j].Value, a.Nodes[j].Depth) {
+		return true
+	}
 	// Promotions should always be searched first
 	if a.Nodes[i].Value.Promo() != chess.NoPieceType && a.Nodes[j].Value.Promo() == chess.NoPieceType {
 		return true
