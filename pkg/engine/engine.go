@@ -63,6 +63,7 @@ type Worker struct {
 	Root       *Node
 	Depth      int
 	Engine     *Engine
+	PVTable    *sync.Map
 	Stop       bool
 }
 
@@ -170,13 +171,6 @@ func (a byMVVLVA) Less(i, j int) bool {
 	return false
 }
 
-func abs(v int16) int16 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
 // captureValue returns the material change caused by the capture
 func (w *Worker) captureValue(move *chess.Move) int16 {
 	// Get the Victim and Attacker Pieces
@@ -234,13 +228,6 @@ func (e *Engine) Search() *chess.Move {
 	fmt.Printf("[YGG] Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
 	fmt.Printf("[YGG] QGenerated:%v QVisited:%v FrontierUnstable:%v\n", e.QGeneratedNodes, e.QVisited, e.FrontierUnstable)
 	return origin
-}
-
-func u8Max(a uint8, b uint8) uint8 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // SearchSynchronousFull will fully search the tree to the Specified Depth
@@ -530,7 +517,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 				bestNode = nod
 			}
 			// Raise Alpha if the Current Child is Greater than Alpha
-			alpha = f32max(alpha, ev)
+			alpha = i16max(alpha, ev)
 			// Check if the Current Child Causes Pruning, in which case we can stop the Iteration immediately
 			if beta <= alpha {
 				break
@@ -561,7 +548,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 			worstNode = nod
 		}
 		// Lower Beta if the Current Child is Lower than Alpha
-		beta = f32min(beta, ev)
+		beta = i16min(beta, ev)
 		// Check if the Current Child Causes Pruning, in which case we can stop the Iteration immediately
 		if beta <= alpha {
 			break
@@ -709,18 +696,4 @@ func EvaluatePosition(pos *chess.Position, clr chess.Color) int16 {
 		return 0
 	}
 	return score
-}
-
-func f32min(a int16, b int16) int16 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func f32max(a int16, b int16) int16 {
-	if a > b {
-		return a
-	}
-	return b
 }
