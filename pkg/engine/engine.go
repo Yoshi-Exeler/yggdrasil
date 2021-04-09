@@ -53,7 +53,8 @@ type Engine struct {
 	Visited            uint
 	QVisited           uint
 	LoadedFromPosCache uint
-	FrontierUnstable   uint
+	NMP                uint
+	DeltaP             uint
 }
 
 type Worker struct {
@@ -127,9 +128,9 @@ func (e *Engine) Search() *chess.Move {
 	// Get the Origin Move of the Best Leaf, i.e. the move to play
 	origin := bestNode.getSequence(e)[0]
 	// Log some information about the search we just completed
-	fmt.Printf("Sequence:%v\nTarget:%v\nOrigin:%v D:%v QD:%v\n", bestNode.getSequence(e), math.Round(float64(bestScore)*100)/100, origin, bestNode.Depth, bestNode.QDepth)
+	fmt.Printf("Principal Variation:%v\nMinimax Value:%v\nDepth:%v QuiescDepth:%v\n", bestNode.getSequence(e), math.Round(float64(bestScore)*100)/100, bestNode.Depth, bestNode.QDepth)
 	fmt.Printf("Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
-	fmt.Printf("QGenerated:%v QVisited:%v FrontierUnstable:%v\n", e.QGeneratedNodes, e.QVisited, e.FrontierUnstable)
+	fmt.Printf("QGenerated:%v QVisited:%v NMP:%v DeltaP:%v\n", e.QGeneratedNodes, e.QVisited, e.NMP, e.DeltaP)
 	return origin
 }
 
@@ -138,7 +139,7 @@ func (e *Engine) SearchSynchronousFull(game *chess.Game, depth int) (*Node, int1
 	w := &Worker{Engine: e, Simulation: game.Position(), Origin: *game.Position(), Depth: depth, Root: &Node{Depth: 0, QDepth: 0, StatusEval: MinScore, StatusChecked: true}}
 	w.Evaluation = w.Simulation.Board().EvaluateFastI16()
 	w.KillerMoves = make(map[int8][2]*chess.Move)
-	return w.MinimaxPruning(w.Root, MinScore, MaxScore, depth, true)
+	return w.MinimaxPruning(w.Root, MinScore, MaxScore, depth, true, true)
 }
 
 // SearchSynchronousIterative
@@ -155,12 +156,12 @@ func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime tim
 	start := time.Now()
 	for {
 		w.Evaluation = w.Simulation.Board().EvaluateFastI16()
-		nd, score := w.MinimaxPruning(w.Root, MinScore, MaxScore, currentDepth, true)
+		nd, score := w.MinimaxPruning(w.Root, MinScore, MaxScore, currentDepth, true, true)
 		if w.Stop {
 			break
 		}
 		elapsed := time.Since(start)
-		fmt.Printf("Completed depth=%v target=%v elapsed=%v\n", currentDepth, score, elapsed)
+		fmt.Printf("Completed depth=%v	target=%v	elapsed=%v	nodes=%v\n", currentDepth, score, elapsed, w.Engine.GeneratedNodes+w.Engine.QGeneratedNodes)
 		bestNode = nd
 		bestScore = score
 		currentDepth++
@@ -361,6 +362,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 				capturedPiece := w.Simulation.Board().Piece(alloc.Value.S2)
 				// Check that the Value of the Captured Piece Plus Delta is greater than alpha (Delta Pruning)
 				if (w.Evaluation - pieceValues[capturedPiece] + Delta) < alpha {
+					w.Engine.DeltaP++
 					continue
 				}
 			}
@@ -413,6 +415,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 				capturedPiece := w.Simulation.Board().Piece(alloc.Value.S2)
 				// Check that the Value of the Captured Piece Plus Delta is greater than alpha (Delta Pruning)
 				if (w.Evaluation - pieceValues[capturedPiece] - Delta) > beta {
+					w.Engine.DeltaP++
 					continue
 				}
 			}
@@ -449,7 +452,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 // as the Root node. The Tree will be Searched with the Minimax Algorithm. Alpha/Beta Pruning will be used
 // to significantly reduce the Required workload. Quiescence Search and an In-Check Search Extension will
 // be used to mitigate the Horizon effect to a reasonable degree.
-func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, max bool) (*Node, int16) {
+func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, max bool, nmp bool) (*Node, int16) {
 	// Immediately Exit if our worker was stopped, returns will be ignored
 	if w.Stop {
 		return node, 0
@@ -466,6 +469,46 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	if depth <= 0 && !node.IsCheck() {
 		return node, w.QuiescenseSearch(node, alpha, beta, max)
 	}
+	// If this is not a null window search and we are not in check or at the root and below R
+	if nmp && !node.IsCheck() && node.Value != nil && depth >= NullReduction {
+		// if this is a maximizing branch
+		if max {
+			// create a snapshot of the simulation
+			snap := *w.Simulation
+			// make a 'null move', this effectively passes the turn without doing anything
+			w.Simulation.Update(nil)
+			// Search the Resulting position with a Null Aspiration window
+			_, score := w.MinimaxPruning(node, beta-1, beta, depth-1-NullReduction, false, false)
+			// Restore the Snaphot to unmake the null move (toggle the turn back to us)
+			w.Simulation = &snap
+			// If the result of the null window search would causes a beta cutoff
+			if score >= beta {
+				// Increment the Amount of NMP Activations
+				w.Engine.NMP++
+				// Return the Exact Score of the Null Window Search (the relative bound)
+				return node, score
+			}
+			// if this is a minimizing branch
+		} else {
+			// create a snapshot of the simulation
+			snap := *w.Simulation
+			// make a 'null move', this effectively passes the turn without doing anything
+			w.Simulation.Update(nil)
+			// Search the Resulting position with a Null Aspiration window
+			_, score := w.MinimaxPruning(node, alpha, alpha+1, depth-1-NullReduction, true, false)
+			// Restore the Snaphot to unmake the null move (toggle the turn back to us)
+			w.Simulation = &snap
+			// If the result of the null window search would causes a beta cutoff
+			if score <= alpha {
+				// Increment the Amount of NMP Activations
+				w.Engine.NMP++
+				// Return the Exact Score of the Null Window Search (the relative bound)
+				return node, score
+			}
+		}
+
+	}
+
 	// If we are in a maximizing Branch
 	if max {
 		best := MinScore
@@ -481,7 +524,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 			// Simulate the Move of the current Child
 			snapshot := w.MakeMove(&alloc)
 			// Recursively Call Minimax for each child
-			nod, ev := w.MinimaxPruning(&alloc, alpha, beta, depth-1, false)
+			nod, ev := w.MinimaxPruning(&alloc, alpha, beta, depth-1, false, true)
 			// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
 			w.UnmakeMove(snapshot)
 			// if the Current Child is better than the Previous best, it becomes the new Best
@@ -514,7 +557,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		// Simulate the Move of the current Child
 		snapshot := w.MakeMove(&alloc)
 		// Recursively Call Minimax for each child
-		nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, true)
+		nod, ev := w.MinimaxPruning(child, alpha, beta, depth-1, true, true)
 		// Restore the Snapshot, we cannot just invert the move and update the simulation beacuse of promotions
 		w.UnmakeMove(snapshot)
 		// if the Current Child is worse than the Previous worst, it becomes the new worst

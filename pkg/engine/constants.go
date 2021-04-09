@@ -12,6 +12,8 @@ const DeltaMax = 97
 // Delta is the Safety margin for Delta Pruning
 const Delta = 20
 
+const NullReduction = 3
+
 var whitePawnPositionalValuesI16 = [64]int16{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
