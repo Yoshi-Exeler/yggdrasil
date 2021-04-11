@@ -90,7 +90,7 @@ type Snapshot struct {
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
-	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 5, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
+	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 10, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
 }
 
 // Search will Search will produce a move to play next
@@ -220,10 +220,10 @@ func (w *Worker) MakeMove(node *Node) *Snapshot {
 	if status == chess.Checkmate {
 		if w.Simulation.Turn() == chess.Black {
 			// Override the Evaluation with the Checkmate Value for White
-			w.Evaluation = -10000
+			w.Evaluation = -10000 - (100 - int16(node.Depth))
 		}
 		// Override the Evaluation with the Checkmate Value for Black
-		w.Evaluation = 10000
+		w.Evaluation = 10000 + (100 - int16(node.Depth))
 	}
 	// Get the Positional Differential caused by the move
 	if piece == chess.WhitePawn {
@@ -357,7 +357,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 			// Make sure not to leak a pointer to the Iterator
 			alloc := *child
 			// Only if the current Move is a Capture, we do delta pruning
-			if alloc.Value.HasTag(chess.Capture) {
+			if alloc.Value.HasTag(chess.Capture) && alloc.Value.Promo() == chess.NoPieceType {
 				// Get the Piece Being Captured
 				capturedPiece := w.Simulation.Board().Piece(alloc.Value.S2)
 				// Check that the Value of the Captured Piece Plus Delta is greater than alpha (Delta Pruning)
@@ -410,7 +410,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 			// Make sure not to leak a pointer to the Iterator
 			alloc := *child
 			// Only if the current Move is a Capture, we do delta pruning
-			if alloc.Value.HasTag(chess.Capture) {
+			if alloc.Value.HasTag(chess.Capture) && alloc.Value.Promo() == chess.NoPieceType {
 				// Get the Piece Being Captured
 				capturedPiece := w.Simulation.Board().Piece(alloc.Value.S2)
 				// Check that the Value of the Captured Piece Plus Delta is greater than alpha (Delta Pruning)
@@ -499,7 +499,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 				_, score := w.MinimaxPruning(node, alpha, alpha+1, depth-1-NullReduction, true, false)
 				// Restore the Snaphot to unmake the null move (toggle the turn back to us)
 				w.Simulation = &snap
-				// If the result of the null window search would causes a beta cutoff
+				// If the result of the null window search would causes an alpha cutoff
 				if score <= alpha {
 					// Increment the Amount of NMP Activations
 					w.Engine.NMP++
