@@ -90,14 +90,14 @@ type Snapshot struct {
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
-	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 15, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
+	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 2, ProcessingTime: time.Second * 5, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position(), SharedCache: &sync.Map{}}
 }
 
 // Search will Search will produce a move to play next
 func (e *Engine) Search() *chess.Move {
 	// Check that we can actually play a move here
 	if statusIsEnd(e.Origin.Status()) {
-		fmt.Println("[YGG] Aborting search, no possible moves exist")
+		fmt.Println("Aborting search, no possible moves exist")
 		return nil
 	}
 	// if the opening theory database is enabled
@@ -240,7 +240,7 @@ func (w *Worker) MakeMove(node *Node) *Snapshot {
 		prom := node.Value.Promo()
 		if prom != chess.NoPieceType {
 			// Add the Piece that was Promoted into to the Evaluation and remove the Pawn that was used
-			w.Evaluation += pieceValues[prom] - pieceValues[chess.BlackPawn]
+			w.Evaluation += pieceValues[prom+6] - pieceValues[chess.BlackPawn]
 		}
 	} else if piece == chess.BlackBishop || piece == chess.BlackKnight || piece == chess.BlackRook || piece == chess.BlackQueen {
 		w.Evaluation += blackPiecePositionalValuesI16[node.Value.S2] - blackPiecePositionalValuesI16[node.Value.S1]
@@ -469,45 +469,47 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	if depth <= 0 && !node.IsCheck() {
 		return node, w.QuiescenseSearch(node, alpha, beta, max)
 	}
-	// If this is not a null window search and we are not in check or at the root and below R
-	if nmp && !node.IsCheck() && node.Value != nil && depth >= NullReduction {
-		// if this is a maximizing branch
-		if max {
-			// create a snapshot of the simulation
-			snap := *w.Simulation
-			// make a 'null move', this effectively passes the turn without doing anything
-			w.Simulation.Update(nil)
-			// Search the Resulting position with a Null Aspiration window
-			_, score := w.MinimaxPruning(node, beta-1, beta, depth-1-NullReduction, false, false)
-			// Restore the Snaphot to unmake the null move (toggle the turn back to us)
-			w.Simulation = &snap
-			// If the result of the null window search would causes a beta cutoff
-			if score >= beta {
-				// Increment the Amount of NMP Activations
-				w.Engine.NMP++
-				// Return the Exact Score of the Null Window Search (the relative bound)
-				return node, score
+	/*
+		// If this is not a null window search and we are not in check or at the root and below R
+		if nmp && !node.IsCheck() && node.Value != nil && depth >= NullReduction {
+			// if this is a maximizing branch
+			if max {
+				// create a snapshot of the simulation
+				snap := *w.Simulation
+				// make a 'null move', this effectively passes the turn without doing anything
+				w.Simulation.Update(nil)
+				// Search the Resulting position with a Null Aspiration window
+				_, score := w.MinimaxPruning(node, beta-1, beta, depth-1-NullReduction, false, false)
+				// Restore the Snaphot to unmake the null move (toggle the turn back to us)
+				w.Simulation = &snap
+				// If the result of the null window search would causes a beta cutoff
+				if score >= beta {
+					// Increment the Amount of NMP Activations
+					w.Engine.NMP++
+					// Return the Exact Score of the Null Window Search (the relative bound)
+					return node, score
+				}
+				// if this is a minimizing branch
+			} else {
+				// create a snapshot of the simulation
+				snap := *w.Simulation
+				// make a 'null move', this effectively passes the turn without doing anything
+				w.Simulation.Update(nil)
+				// Search the Resulting position with a Null Aspiration window
+				_, score := w.MinimaxPruning(node, alpha, alpha+1, depth-1-NullReduction, true, false)
+				// Restore the Snaphot to unmake the null move (toggle the turn back to us)
+				w.Simulation = &snap
+				// If the result of the null window search would causes a beta cutoff
+				if score <= alpha {
+					// Increment the Amount of NMP Activations
+					w.Engine.NMP++
+					// Return the Exact Score of the Null Window Search (the relative bound)
+					return node, score
+				}
 			}
-			// if this is a minimizing branch
-		} else {
-			// create a snapshot of the simulation
-			snap := *w.Simulation
-			// make a 'null move', this effectively passes the turn without doing anything
-			w.Simulation.Update(nil)
-			// Search the Resulting position with a Null Aspiration window
-			_, score := w.MinimaxPruning(node, alpha, alpha+1, depth-1-NullReduction, true, false)
-			// Restore the Snaphot to unmake the null move (toggle the turn back to us)
-			w.Simulation = &snap
-			// If the result of the null window search would causes a beta cutoff
-			if score <= alpha {
-				// Increment the Amount of NMP Activations
-				w.Engine.NMP++
-				// Return the Exact Score of the Null Window Search (the relative bound)
-				return node, score
-			}
-		}
 
-	}
+		}
+	*/
 
 	// If we are in a maximizing Branch
 	if max {
