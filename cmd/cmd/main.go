@@ -18,15 +18,15 @@ import (
 
 var game *chess.Game
 var reader *bufio.Reader
-var wmove = false
+var wmove = true
 var clear map[string]func() //create a map for storing clear funcs
 
 func main() {
 	// Create STDIN Reader
 	reader = bufio.NewReader(os.Stdin)
 	// Create the Game
-	//fenStr := "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-	fenStr := "8/8/5k2/8/8/1pp4K/1r5P/7R b - - 0 1"
+	fenStr := "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+	//fenStr := "8/8/5k2/8/8/1pp4K/1r5P/7R b - - 0 1"
 	fen, _ := chess.FEN(fenStr)
 	game = chess.NewGame(fen)
 	// Enter Game Loop
