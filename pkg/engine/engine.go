@@ -34,25 +34,22 @@ import (
 
 // Engine is the Minimax Engine
 type Engine struct {
-	SearchMode         uint8 // 1 = SyncFull, 2 = SyncIterative, 3 = AMP
-	Depth              int
-	ProcessingTime     time.Duration
-	UseOpeningTheory   bool
-	Game               *chess.Game
-	Origin             chess.Position
-	ECO                *opening.BookECO
-	Color              chess.Color
-	SharedTable        *transposition.Table
-	PVTable            *PVT
-	TableHits          uint
-	GeneratedNodes     uint
-	QGeneratedNodes    uint
-	EvaluatedNodes     uint
-	Visited            uint
-	QVisited           uint
-	LoadedFromPosCache uint
-	NMP                uint
-	DeltaP             uint
+	SearchMode       uint8 // 1 = SyncFull, 2 = SyncIterative, 3 = AMP
+	Depth            int
+	ProcessingTime   time.Duration
+	UseOpeningTheory bool
+	Game             *chess.Game
+	Origin           chess.Position
+	ECO              *opening.BookECO
+	Color            chess.Color
+	SharedTable      *transposition.Table
+	TableHits        uint
+	GeneratedNodes   uint
+	QGeneratedNodes  uint
+	EvaluatedNodes   uint
+	Visited          uint
+	QVisited         uint
+	DeltaP           uint
 }
 
 type Worker struct {
@@ -77,8 +74,7 @@ type Node struct {
 	StatusEval    int16
 	StatusChecked bool
 	Hash          uint64
-	TableChecked  bool
-	EntryUsable   bool
+	PVX           []*chess.Move
 }
 
 // Snapshot represents a snapshot of an evaluation state
@@ -89,7 +85,7 @@ type Snapshot struct {
 
 // NewEngine returns a new Engine from the specified game
 func NewEngine(game *chess.Game, clr chess.Color) *Engine {
-	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 3, ProcessingTime: time.Second * 15, PVTable: NewPVT(), SharedTable: &transposition.Table{Table: &sync.Map{}}, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position()}
+	return &Engine{UseOpeningTheory: false, Depth: 1, SearchMode: 3, ProcessingTime: time.Second * 15, SharedTable: &transposition.Table{Table: &sync.Map{}}, ECO: opening.NewBookECO(), Game: game, Color: clr, Origin: *game.Position()}
 }
 
 // Search will Search will produce a move to play next
@@ -126,13 +122,13 @@ func (e *Engine) Search() *chess.Move {
 	case 3:
 		// SynchronousIterative will search Synchronously using Iterative Deepening until the
 		// specified processing time has elapsed
-		bestNode, bestScore = e.SearchSMP(e.Game, e.ProcessingTime, 7)
+		bestNode, bestScore = e.SearchSMP(e.Game, e.ProcessingTime, 8)
 	}
 	// Get the Origin Move of the Best Leaf, i.e. the move to play
 	origin := bestNode.getSequence(e)[0]
 	// Log some information about the search we just completed
-	fmt.Printf("Principal Variation:%v\nMinimax Value:%v\nDepth:%v\n", bestNode.getSequence(e), bestScore, bestNode.Depth)
-	fmt.Printf("Generated:%v Visited:%v Evaluated:%v LoadedFromCache:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes, e.LoadedFromPosCache)
+	fmt.Printf("Principal Variation:%v\nMinimax Value:%v\nDepth:%v\n", bestNode.getSequence(e), bestScore, len(bestNode.getSequence(e)))
+	fmt.Printf("Generated:%v Visited:%v Evaluated:%v\n", e.GeneratedNodes, e.Visited, e.EvaluatedNodes)
 	fmt.Printf("QGenerated:%v QVisited:%v TranspositionHits:%v DeltaP:%v\n", e.QGeneratedNodes, e.QVisited, e.TableHits, e.DeltaP)
 	if bestScore > 10000 {
 		fmt.Printf("Checkmate for black in %v ply\n", abs(bestScore-10100))
@@ -173,8 +169,6 @@ func (e *Engine) SearchSynchronousIterative(game *chess.Game, processingTime tim
 		fmt.Printf("Completed depth=%v	target=%v	elapsed=%v	nodes=%v\n", currentDepth, score, elapsed, w.Engine.GeneratedNodes+w.Engine.QGeneratedNodes)
 		bestNode = nd
 		bestScore = score
-		// Update the Principal Variation Table
-		e.PVTable.Update(bestNode.getSequence(e), currentDepth-1)
 		currentDepth++
 	}
 	return bestNode, bestScore
@@ -202,13 +196,11 @@ func (e *Engine) SearchSMP(game *chess.Game, processingTime time.Duration, worke
 				break
 			}
 			elapsed := time.Since(start)
-			fmt.Printf("Completed depth=%v	target=%v	elapsed=%v	nodes=%v\n", currentDepth, score, elapsed, w.Engine.GeneratedNodes+w.Engine.QGeneratedNodes)
+			fmt.Printf("Completed depth=%v	target=%v	elapsed=%v	nodes=%v\n", currentDepth, score, elapsed, w.Engine.Visited)
 			if currentDepth > maxdepth {
 				maxdepth = currentDepth
 				bestNode = nd
 				bestScore = score
-				// Update the Principal Variation Table
-				e.PVTable.Update(bestNode.getSequence(e), currentDepth)
 			}
 			currentDepth++
 		}
@@ -375,7 +367,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		// Generate the Unstable Children of the Node, make sure not to influence the sim
 		unstable := node.GetUnstableLeaves(w, max, node.IsCheck())
 		// Sort the Unstable nodes using MVVLVA to increase search speed
-		sort.Sort(byMVVLVA{Nodes: unstable, Worker: w, PV: w.Engine.PVTable.GetPV(), Quiescence: true})
+		sort.Sort(byMVVLVA{Nodes: unstable, Worker: w, Quiescence: true})
 		// Iterate over the Unstable children of the node
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
@@ -428,7 +420,7 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 		// Generate the Unstable Children of the Node
 		unstable := node.GetUnstableLeaves(w, max, node.IsCheck())
 		// Sort the Unstable nodes using MVVLVA to increase search speed
-		sort.Sort(byMVVLVA{Nodes: unstable, Worker: w, PV: w.Engine.PVTable.GetPV(), Quiescence: true})
+		sort.Sort(byMVVLVA{Nodes: unstable, Worker: w, Quiescence: true})
 		// Iterate over the Unstable children of the node
 		for _, child := range unstable {
 			// Make sure not to leak a pointer to the Iterator
@@ -474,38 +466,12 @@ func (w *Worker) QuiescenseSearch(node *Node, alpha int16, beta int16, max bool)
 
 // MinimaxPruning will Dynamically build a Searchtree starting with the node specified in the Initial Call
 // as the Root node. The Tree will be Searched with the Minimax Algorithm. Alpha/Beta Pruning will be used
-// to significantly reduce the Required workload. Quiescence Search and an In-Check Search Extension will
-// be used to mitigate the Horizon effect to a reasonable degree.
+// to significantly reduce the Required workload. Quiescence Search will be used to mitigate the Horizon effect
+// to a reasonable degree.
 func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, max bool, nmp bool) (*Node, int16) {
 	// Immediately Exit if our worker was stopped, returns will be ignored
 	if w.Stop {
 		return node, 0
-	}
-	// Query the Transposition Table
-	entry := w.Engine.SharedTable.Query(node.getHash(w))
-	// If the Transposition Table Query Produced a Hit
-	if entry != nil {
-		// Check that we are Min/Max aligned and this entry contains usefull information
-		if depth <= entry.Depth && max == entry.Max {
-			// If this entry contains an exact score
-			if entry.Exact {
-				w.Engine.TableHits++
-				// We skip all further processing of this node and return the stored result
-				return node, entry.Score
-			}
-			// If this entry is an upper bound that raises or matches the current upper bound
-			if !entry.Exact && entry.Alpha && entry.Score >= alpha {
-				w.Engine.TableHits++
-				// We skip all further processing of this node and return the stored result
-				return node, entry.Score
-			}
-			// If this entry is a lower bound that lowers or matches the current lower bound
-			if !entry.Exact && !entry.Alpha && entry.Score <= beta {
-				w.Engine.TableHits++
-				// We skip all further processing of this node and return the stored result
-				return node, entry.Score
-			}
-		}
 	}
 	// Increment the Nodes visited by the Search
 	w.Engine.Visited++
@@ -515,15 +481,50 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		// If this node is a Terminating Node return its evaluation
 		return node, nseval
 	}
-	// If we are at or below the target depth and not in check, Evaluate this Node using Quiescence Search if neccessary
-	if depth <= 0 && !node.IsCheck() {
+	// If we are at the target depth, Evaluate this Node using Quiescence Search
+	if depth == 0 {
 		// Perform Quiescence Search to get a score
-		score := w.QuiescenseSearch(node, alpha, beta, max)
-		// Commit the Result to the Transposition Table as an exact score with depth 0 (evaluation table entry)
-		//w.Engine.SharedTable.Commit(w.Simulation.Hash(), transposition.Entry{Score: score, Exact: true, Max: max, Alpha: false, Depth: 0})
-		return node, score
+		return node, w.QuiescenseSearch(node, alpha, beta, max)
 	}
-
+	// Query the Transposition Table
+	entry := w.Engine.SharedTable.Query(node.getHash(w))
+	// Attempt to get a pv from a transposition or previous iteration
+	var transpositionPV *chess.Move
+	// If the Transposition Table Query Produced a Hit
+	if entry != nil {
+		// Check that we are Min/Max aligned
+		if max == entry.Max {
+			// Get the TranspositionPV
+			transpositionPV = w.GetTranspositionPV(node)
+			// Check if this node can replace further search
+			if depth <= entry.Depth {
+				// If this entry contains an exact score
+				if entry.Exact {
+					w.Engine.TableHits++
+					// Append the PV of the Entry as a Principal Variation extension to the current node
+					node.PVX = append(node.PVX, entry.Sequence...)
+					// We skip all further processing of this node and return the stored result
+					return node, entry.Score
+				}
+				// If this entry is an upper bound that raises or matches the current upper bound
+				if !entry.Exact && entry.Alpha && entry.Score >= alpha {
+					w.Engine.TableHits++
+					// Append the PV of the Entry as a Principal Variation extension to the current node
+					node.PVX = append(node.PVX, entry.Sequence...)
+					// We skip all further processing of this node and return the stored result
+					return node, entry.Score
+				}
+				// If this entry is a lower bound that lowers or matches the current lower bound
+				if !entry.Exact && !entry.Alpha && entry.Score <= beta {
+					w.Engine.TableHits++
+					// Append the PV of the Entry as a Principal Variation extension to the current node
+					node.PVX = append(node.PVX, entry.Sequence...)
+					// We skip all further processing of this node and return the stored result
+					return node, entry.Score
+				}
+			}
+		}
+	}
 	// If we are in a maximizing Branch
 	if max {
 		best := MinScore
@@ -531,7 +532,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		// Generate the Children of the current node
 		leaves := node.GenerateLeaves(w)
 		// Sort them by their Expected impact on the Evaluation (Captures and Checks first)
-		sort.Sort(byMVVLVA{Nodes: leaves, Worker: w, PV: w.Engine.PVTable.GetPV(), Depth: int(node.Depth), Alpha: alpha, Beta: beta, Max: max})
+		sort.Sort(byMVVLVA{Nodes: leaves, Worker: w, DepthRemaining: depth, TPV: transpositionPV, Quiescence: false, Depth: int(node.Depth), Alpha: alpha, Beta: beta, Max: max})
 		// Iterate over the Children of the Current Node
 		for _, child := range leaves {
 			// Prevent Leaking the Loop iterator
@@ -559,10 +560,10 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 		// Check if this is an upper bound on the minimax value
 		if best == alpha {
 			// Commit the result to the transposition table
-			w.Engine.SharedTable.Commit(node.getHash(w), transposition.Entry{Score: best, Exact: false, Max: max, Alpha: true, Depth: int(node.Depth)})
+			w.Engine.SharedTable.Commit(node.getHash(w), transposition.Entry{Score: best, Exact: false, Max: max, Alpha: true, Depth: depth, Sequence: bestNode.getSequence(w.Engine)[node.Depth:]}, node.Value)
 		} else {
 			// Commit the result to the transposition table
-			w.Engine.SharedTable.Commit(node.getHash(w), transposition.Entry{Score: best, Exact: true, Max: max, Alpha: false, Depth: int(node.Depth)})
+			w.Engine.SharedTable.Commit(node.getHash(w), transposition.Entry{Score: best, Exact: true, Max: max, Alpha: false, Depth: depth, Sequence: bestNode.getSequence(w.Engine)[node.Depth:]}, node.Value)
 		}
 		return bestNode, best
 	}
@@ -572,7 +573,7 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	// Generate the Children of the current node
 	leaves := node.GenerateLeaves(w)
 	// Sort them by their Expected impact on the Evaluation (Captures and Checks first)
-	sort.Sort(byMVVLVA{Nodes: leaves, Worker: w, PV: w.Engine.PVTable.GetPV(), Depth: int(node.Depth), Alpha: alpha, Beta: beta, Max: max})
+	sort.Sort(byMVVLVA{Nodes: leaves, Worker: w, DepthRemaining: depth, TPV: transpositionPV, Quiescence: false, Depth: int(node.Depth), Alpha: alpha, Beta: beta, Max: max})
 	// Iterate over the Children of the Current Node
 	for _, child := range leaves {
 		// Prevent Leaking the Loop iterator
@@ -600,10 +601,10 @@ func (w *Worker) MinimaxPruning(node *Node, alpha int16, beta int16, depth int, 
 	// Check if this is an upper bound on the minimax value
 	if worst == beta {
 		// Commit the result to the transposition table
-		w.Engine.SharedTable.Commit(node.getHash(w), transposition.Entry{Score: worst, Exact: false, Max: max, Alpha: false, Depth: int(node.Depth)})
+		w.Engine.SharedTable.Commit(node.getHash(w), transposition.Entry{Score: worst, Exact: false, Max: max, Alpha: false, Depth: depth, Sequence: worstNode.getSequence(w.Engine)[node.Depth:]}, node.Value)
 	} else {
 		// Commit the result to the transposition table
-		w.Engine.SharedTable.Commit(node.getHash(w), transposition.Entry{Score: worst, Exact: true, Max: max, Alpha: false, Depth: int(node.Depth)})
+		w.Engine.SharedTable.Commit(node.getHash(w), transposition.Entry{Score: worst, Exact: true, Max: max, Alpha: false, Depth: depth, Sequence: worstNode.getSequence(w.Engine)[node.Depth:]}, node.Value)
 	}
 	return worstNode, worst
 }
@@ -709,6 +710,10 @@ func (n *Node) getSequence(e *Engine) []*chess.Move {
 		cnode = cnode.Parent
 	}
 	rev := reverseSequence(seq)
+	// Append the Sequence extension if it exists
+	if len(n.PVX) > 0 {
+		rev = append(rev, n.PVX...)
+	}
 	return rev
 }
 
@@ -740,4 +745,25 @@ func EvaluatePosition(pos *chess.Position, clr chess.Color) int16 {
 		return 0
 	}
 	return score
+}
+
+func (w *Worker) GetTranspositionPV(nd *Node) *chess.Move {
+	// Obtain the Node hash as efficiently as possible
+	nodeHash := uint64(0)
+	// if the hash has been computed before, just reuse it
+	if nd.Hash != 0 {
+		nodeHash = nd.Hash
+	} else {
+		// otherwise compute the hash
+		snap := w.Simulation
+		w.Simulation = w.Simulation.Update(nd.Value)
+		h := w.Simulation.Hash()
+		nd.Hash = h
+		w.Simulation = snap
+		nodeHash = h
+	}
+	// Query the Transposition table
+	entry := w.Engine.SharedTable.Query(nodeHash)
+	// Read the transposition pv
+	return entry.Sequence[0]
 }
