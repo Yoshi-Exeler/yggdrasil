@@ -108,7 +108,7 @@ func MakeRandomMove() {
 
 // ReadSTDIN will prompt the user and read stdin
 func ReadSTDIN() string {
-	text, _ := reader.ReadString('\r')
+	text, _ := reader.ReadString('\n')
 	return text
 }
 
